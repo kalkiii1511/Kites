@@ -224,6 +224,10 @@ void ProcessorManager::stop()
 {
     m_currentProcessor->RequestStop();
 }
+void ProcessorManager::stopPreservingState()
+{
+    m_currentProcessor->RequestStopPreservingState();
+}
 void ProcessorManager::pause()
 {
     m_currentProcessor->RequestPause();
@@ -254,6 +258,11 @@ void ProcessorManager::setStepDelay(unsigned int delay)
 void ProcessorManager::setBreakpoints(const std::vector<uint64_t> &breakpoints)
 {
     m_currentProcessor->SetBreakpoints(breakpoints);
+}
+
+void ProcessorManager::setBreakpointAddresses(const std::vector<uint64_t> &addresses)
+{
+    m_currentProcessor->SetBreakpointAddresses(addresses);
 }
 
 RegisterFile *ProcessorManager::getRegisterFile() const

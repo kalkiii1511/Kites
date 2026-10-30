@@ -29,6 +29,12 @@ void ProcessorBase::RequestStop()
     pause_wait_condition_.wakeAll();
     Reset();
 }
+void ProcessorBase::RequestStopPreservingState()
+{
+    QMutexLocker locker(&pause_mutex_);
+    stop_requested_ = true;
+    pause_wait_condition_.wakeAll();
+}
 void ProcessorBase::RequestPause()
 {
     pause_requested_ = true;
@@ -236,6 +242,19 @@ void ProcessorBase::SetBreakpoints(const std::vector<uint64_t> &breakpoints)
     for (const auto &bp : breakpoints)
     {
         breakpoints_.emplace_back(program_.line_number_instruction_number_mapping[bp] * 4);
+    }
+}
+
+void ProcessorBase::SetBreakpointAddresses(const std::vector<uint64_t> &addresses)
+{
+    breakpoints_.clear();
+    breakpoints_.push_back(program_size_);
+    for (const uint64_t address : addresses)
+    {
+        if (address < program_size_ && address % 4 == 0 && !CheckBreakpoint(address))
+        {
+            breakpoints_.push_back(address);
+        }
     }
 }
 

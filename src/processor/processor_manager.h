@@ -42,6 +42,7 @@ public:
     void step();
     void debugRun();
     void stop();
+    void stopPreservingState();
     void pause();
     void resume();
     void undo();
@@ -52,6 +53,7 @@ public:
     void setStepDelay(unsigned int delay);
 
     void setBreakpoints(const std::vector<uint64_t> &breakpoints);
+    void setBreakpointAddresses(const std::vector<uint64_t> &addresses);
 
     RegisterFile *getRegisterFile() const;
     MemoryController *getMemoryController() const;

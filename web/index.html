@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0c1017" />
+    <title>Kites · RISC-V Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Kites home">
+          <span class="brand-mark"><i></i><i></i><i></i><i></i></span>
+          <span class="brand-name">kites<span class="brand-dot">.</span></span>
+          <span class="brand-divider"></span>
+          <span class="brand-product">RISC-V STUDIO</span>
+        </a>
+        <nav class="app-menu" aria-label="Application menu"><span>File</span><span>Edit</span><span>View</span><span>Processor</span><span>Help</span></nav>
+        <div class="topbar-right">
+          <label class="api-field"><span>API</span><input id="api-url" aria-label="Simulator API URL" spellcheck="false" /><button id="connect-btn" type="button">Connect</button></label>
+          <span id="api-status" class="connection"><span class="status-dot"></span><span>Checking</span></span>
+          <a class="icon-link" href="/docs" target="_blank" rel="noreferrer" aria-label="API documentation" title="API docs">↗</a>
+        </div>
+      </header>
+
+      <main>
+        <section class="workspace-titlebar">
+          <div class="view-tabs" role="tablist" aria-label="Simulator views">
+            <button class="view-tab active" data-view="editor" role="tab" aria-selected="true">Editor</button>
+            <button class="view-tab" data-view="processor" role="tab" aria-selected="false">Processor</button>
+          </div>
+          <div class="workspace-name"><span class="file-glyph">▤</span> program.s <span class="unsaved-dot"></span></div>
+          <span class="architecture-chip">RISC-V <b>·</b> RV64IMFD</span>
+        </section>
+
+        <section class="toolbar" aria-label="Simulator controls">
+          <div class="toolbar-left">
+            <div class="vm-picker"><span class="toolbar-label">PROCESSOR</span><select id="vm-select" aria-label="Processor model">
+              <option value="rvss">Single cycle <span>· RV64IMFD</span></option>
+              <option value="rv5-h-f">5-stage · Hazard + forwarding</option>
+              <option value="rv5-h-nf">5-stage · Hazard detection</option>
+              <option value="rv5-nh-f">5-stage · Forwarding</option>
+              <option value="rv5-nh-nf">5-stage · No hazard handling</option>
+            </select><span class="select-chevron">⌄</span></div>
+            <span class="toolbar-separator"></span>
+            <button class="text-button" id="example-btn" type="button"><span class="spark">✳</span> Load example</button>
+          </div>
+          <div class="toolbar-right">
+            <span id="run-message" class="run-message" aria-live="polite">Ready when you are</span>
+            <label class="pace-picker"><span>PACE</span><input id="pace-slider" type="range" min="0" max="1200" step="50" value="450" aria-label="Delay between execution steps" /><output id="pace-value">450 ms</output></label>
+            <button class="run-button" id="run-btn" type="button"><span class="play-icon">▶</span><span>Run program</span><kbd>⌘ ↵</kbd></button>
+          </div>
+        </section>
+
+        <section class="workspace-grid">
+          <article class="panel editor-panel">
+            <div class="panel-heading">
+              <div class="panel-title"><span class="title-icon code-icon">&lt;/&gt;</span><div><h2>Source code</h2><span class="panel-caption">ASSEMBLY EDITOR</span></div></div>
+              <div class="editor-tools"><span id="line-count" class="line-count">1 line</span><button class="subtle-icon" id="clear-btn" type="button" title="Clear editor" aria-label="Clear editor">⌫</button></div>
+            </div>
+            <div class="editor-frame">
+              <div id="line-numbers" class="line-numbers" aria-hidden="true">1</div>
+              <textarea id="source-editor" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="RISC-V assembly source"></textarea>
+            </div>
+            <div class="editor-footer"><span><span class="footer-dot"></span> RISC-V Assembly</span><span id="cursor-position">Ln 1, Col 1 <b>·</b> UTF-8</span></div>
+          </article>
+
+          <article class="panel flow-panel">
+            <div class="panel-heading flow-heading">
+              <div class="panel-title"><span class="title-icon flow-icon">▤</span><div><h2 id="flow-title">Program viewer</h2><span id="flow-caption" class="panel-caption">ASSEMBLED INSTRUCTIONS · HEX</span></div></div>
+              <span class="flow-state" id="flow-status"><i></i> WAITING</span>
+            </div>
+            <div class="flow-summary"><span id="flow-step">Assemble to inspect the compiled binary</span><span id="flow-count">—</span></div>
+            <div class="flow-column-head"><span>BP</span><span>#</span><span>ADDRESS</span><span>MACHINE CODE</span><span>INSTRUCTION</span></div>
+            <div id="flow-list" class="flow-list"><div class="flow-empty"><span class="flow-empty-glyph">{ }</span><strong>Compiled instructions appear here</strong><span>Run the program to follow its execution path.</span></div></div>
+            <div class="flow-footer"><span><i class="legend-red"></i> instruction at current PC</span><span class="flow-pc" id="flow-pc">PC —</span></div>
+          </article>
+        </section>
+
+        <section class="results-grid">
+          <article class="panel registers-panel">
+            <div class="panel-heading register-heading">
+              <div class="panel-title"><span class="title-icon register-icon">▦</span><div><h2>Register file</h2><span class="panel-caption">MACHINE STATE AFTER RUN</span></div></div>
+              <span class="count-chip" id="register-count">32 × 64-bit</span>
+            </div>
+            <div class="register-tabs" role="tablist" aria-label="Register banks">
+              <button class="register-tab active" role="tab" aria-selected="true" data-bank="gp_registers">Integer <span>32</span></button>
+              <button class="register-tab" role="tab" aria-selected="false" data-bank="fp_registers">Floating point <span>32</span></button>
+              <button class="register-tab" role="tab" aria-selected="false" data-bank="control and status registers">CSR</button>
+            </div>
+            <div class="register-table-head"><span>REGISTER</span><span>HEX VALUE</span></div>
+            <div id="register-list" class="register-list" role="tabpanel"></div>
+            <div class="register-footer"><span class="live-pulse"></span><span id="register-caption">Integer registers · ABI names</span><span class="value-format">HEX</span></div>
+          </article>
+          <article class="panel result-panel">
+            <div class="result-heading">
+              <div class="panel-title"><span class="title-icon output-icon">⌁</span><div><h2>Execution output</h2><span class="panel-caption">PROGRAM CONSOLE</span></div></div>
+              <span class="console-badge" id="console-status">IDLE</span>
+            </div>
+            <div class="result-tabs" role="tablist" aria-label="Execution results">
+              <button class="result-tab active" data-result="console">Console</button>
+              <button class="result-tab" data-result="disassembly">Disassembly</button>
+              <button class="result-tab" data-result="memory">Memory</button>
+            </div>
+            <pre id="result-content" class="result-content"><span class="console-muted">Your program output will appear here.</span>
+
+  Ready to assemble and run.</pre>
+          </article>
+        </section>
+
+        <footer class="page-footer"><span><span class="footer-mark">K</span> KITES SIMULATOR</span><span>Built for learning how processors work.</span><span>RV64 <b>·</b> I M F D</span></footer>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

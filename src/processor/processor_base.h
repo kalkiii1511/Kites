@@ -145,11 +145,13 @@ class ProcessorBase : public QObject
     /**@brief Sets the breakpoints vector
      */
     void SetBreakpoints(const std::vector<uint64_t> &breakpoints);
+    void SetBreakpointAddresses(const std::vector<uint64_t> &addresses);
     void AddBreakpoint(uint64_t val, bool is_line = true);
     void RemoveBreakpoint(uint64_t val, bool is_line = true);
     bool CheckBreakpoint(uint64_t address);
 
     void RequestStop();
+    void RequestStopPreservingState();
     void RequestPause();
     void RequestResume();
 

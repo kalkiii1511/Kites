@@ -7,6 +7,7 @@
 #include "common/assembled_program.h"
 #include "common/globals.h"
 #include "processor/processor_manager.h"
+#include "processor/processor_constants.h"
 #include "processor/processor_types.h"
 #include "repl.h"
 #include "utils/utils.h"
@@ -15,6 +16,7 @@
 #include <QObject>
 #include <QString>
 
+#include <iomanip>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -22,6 +24,44 @@
 
 namespace
 {
+void printRegisterState(const Kites::RegisterFile &registers)
+{
+    const auto printValue = [](uint64_t value)
+    {
+        std::cout << "\"0x" << std::hex << std::setw(16) << std::setfill('0') << value
+                  << std::dec << std::setfill(' ') << "\"";
+    };
+
+    std::cout << "[KITES_REGS] {\"gp_registers\":{";
+    const std::vector<uint64_t> gpr = registers.GetGprValues();
+    for (size_t i = 0; i < gpr.size(); ++i)
+    {
+        if (i > 0) std::cout << ",";
+        std::cout << "\"x" << i << "\":";
+        printValue(gpr[i]);
+    }
+
+    std::cout << "},\"fp_registers\":{";
+    const std::vector<uint64_t> fpr = registers.GetFprValues();
+    for (size_t i = 0; i < fpr.size(); ++i)
+    {
+        if (i > 0) std::cout << ",";
+        std::cout << "\"f" << i << "\":";
+        printValue(fpr[i]);
+    }
+
+    std::cout << "},\"control and status registers\":{";
+    bool first = true;
+    for (const auto &[name, address] : Kites::csr_to_address)
+    {
+        if (!first) std::cout << ",";
+        first = false;
+        std::cout << "\"" << name << "\":";
+        printValue(registers.ReadCsr(address));
+    }
+    std::cout << "}}" << std::endl;
+}
+
 void printUsage(const char *programName)
 {
     std::cerr
@@ -30,6 +70,8 @@ void printUsage(const char *programName)
         << "  assembly-file   optional; if given without --repl, assembles, runs to\n"
         << "                  completion, and dumps state (batch mode)\n"
         << "  --vm <name>     rvss (default) | rv5-nh-nf | rv5-h-nf | rv5-nh-f | rv5-h-f\n"
+        << "  --step-delay <ms>  wait between instructions in batch mode (0-5000, default 0)\n"
+        << "  --breakpoint <addr> stop before this aligned hex instruction address; repeatable\n"
         << "  --mem-dump      dump <row_count> 8-byte rows starting at <hex_addr>; "
            "repeatable (batch mode only)\n"
         << "  --repl, -i      drop into the interactive REPL instead of auto-running;\n"
@@ -55,6 +97,8 @@ int main(int argc, char *argv[])
     std::string assemblyFile;
     std::string processorTypeStr = "rvss";
     std::vector<std::string> memDumpArgs;
+    std::vector<uint64_t> breakpointAddresses;
+    unsigned int stepDelayMs = 0;
     bool replRequested = false;
 
     for (int i = 1; i < argc; ++i)
@@ -80,6 +124,58 @@ int main(int argc, char *argv[])
             }
             memDumpArgs.push_back(argv[++i]);
             memDumpArgs.push_back(argv[++i]);
+        }
+        else if (arg == "--step-delay")
+        {
+            if (i + 1 >= argc)
+            {
+                std::cerr << "Error: --step-delay requires a value in milliseconds.\n";
+                printUsage(argv[0]);
+                return 1;
+            }
+            try
+            {
+                const std::string value = argv[++i];
+                size_t parsedLength = 0;
+                const unsigned long parsed = std::stoul(value, &parsedLength);
+                if (parsedLength != value.size() || parsed > 5000)
+                {
+                    throw std::out_of_range("step delay");
+                }
+                stepDelayMs = static_cast<unsigned int>(parsed);
+            }
+            catch (const std::exception &)
+            {
+                std::cerr << "Error: --step-delay must be between 0 and 5000 milliseconds.\n";
+                printUsage(argv[0]);
+                return 1;
+            }
+        }
+        else if (arg == "--breakpoint")
+        {
+            if (i + 1 >= argc)
+            {
+                std::cerr << "Error: --breakpoint requires an instruction address.\n";
+                printUsage(argv[0]);
+                return 1;
+            }
+            try
+            {
+                const std::string value = argv[++i];
+                size_t parsedLength = 0;
+                const uint64_t address = std::stoull(value, &parsedLength, 0);
+                if (parsedLength != value.size() || address % 4 != 0)
+                {
+                    throw std::out_of_range("breakpoint address");
+                }
+                breakpointAddresses.push_back(address);
+            }
+            catch (const std::exception &)
+            {
+                std::cerr << "Error: --breakpoint requires an aligned hex address.\n";
+                printUsage(argv[0]);
+                return 1;
+            }
         }
         else if (arg == "--repl" || arg == "-i")
         {
@@ -152,19 +248,55 @@ int main(int argc, char *argv[])
     Kites::ProcessorManager manager(nullptr, processorTypeIt->second);
 
     bool runFailed = false;
+    bool breakpointHit = false;
     std::string runErrorMsg;
+    size_t traceEntries = 0;
+    bool traceTruncated = false;
+    constexpr size_t maxTraceEntries = 1024;
+    QObject::connect(&manager, &Kites::ProcessorManager::processorClockedSignal, &manager,
+                      [&](const Kites::ProcessorState &state)
+                      {
+                          if (breakpointHit)
+                          {
+                              return;
+                          }
+                          if (state.lastExecutedPC == INVALID_PC)
+                          {
+                              return;
+                          }
+                          if (traceEntries < maxTraceEntries)
+                          {
+                              std::cout << "[KITES_TRACE_PC] " << std::hex << state.lastExecutedPC
+                                        << std::dec << std::endl;
+                              printRegisterState(*manager.getRegisterFile());
+                              ++traceEntries;
+                          }
+                          else if (!traceTruncated)
+                          {
+                              traceTruncated = true;
+                              std::cout << "[KITES_TRACE_TRUNCATED] true" << std::endl;
+                          }
+                      });
     QObject::connect(&manager, &Kites::ProcessorManager::runErrorSignal, &manager,
                       [&](const QString &message, int /*sourceLine*/)
                       {
                           runFailed = true;
                           runErrorMsg = message.toStdString();
                       });
+    QObject::connect(&manager, &Kites::ProcessorManager::processorPausedAtBreakpointSignal, &manager,
+                      [&]()
+                      {
+                          breakpointHit = true;
+                          std::cout << "[KITES_BREAKPOINT] " << std::hex
+                                    << manager.getProgramCounter() << std::dec << std::endl;
+                          printRegisterState(*manager.getRegisterFile());
+                          manager.stopPreservingState();
+                      });
 
-    // ProcessorBase::step_delay_ defaults to 1000ms and is meant to pace the
-    // GUI's per-instruction animation; it must be zeroed here or an N-instruction
-    // program takes N seconds to run.
-    manager.setStepDelay(0);
+    manager.setStepDelay(stepDelayMs);
     manager.loadProgram(program);
+    manager.setBreakpointAddresses(breakpointAddresses);
+    std::cout << "[KITES_COMPILED]" << std::endl;
 
     // Known limitation: a program hitting a blocking read syscall will hang here
     // forever, since nothing in this CLI feeds terminal stdin into the VM's input
@@ -193,7 +325,7 @@ int main(int argc, char *argv[])
 
     std::cout << "Assembled '" << assemblyFile << "': " << program.text_buffer.size()
                << " instruction word(s), " << program.data_buffer.size() << " data item(s).\n"
-               << "Run " << (runFailed ? "failed" : "completed") << ".\n"
+               << "Run " << (runFailed ? "failed" : (breakpointHit ? "paused at breakpoint" : "completed")) << ".\n"
                << "Registers   -> " << Kites::globals::registers_dump_file_path.string() << "\n"
                << "Disassembly -> " << Kites::globals::disassembly_file_path.string() << "\n"
                << "Errors      -> " << Kites::globals::errors_dump_file_path.string();
