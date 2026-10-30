@@ -1,43 +1,79 @@
-# KITES : RISC - V SIMULATOR
+# Kites RISC-V Simulator
 
-Kites a is RISC V simulator and assembly code editor built for RISC V ISA.
-Kites support I,M,D and F extenstion in single cyle mod and I,M extension in 5 Stage pipelining mode.(D,F will be added in future releases).
+Kites is a RISC-V simulator and assembly editor. The web simulator provides an
+assembly editor, a live instruction execution view, register visualization, and
+a console. It supports integer and floating-point registers and the RV64IMFD
+single-cycle processor, as well as the available five-stage processor models.
 
-## Downloading and Installation
+## Run the web simulator
 
-Prebuilt libraries are available for Linux,Windows on [Release Page](https://github.com/hghit-harshit/Kites/releases)
+The FastAPI backend serves the frontend, so no separate Node.js or frontend
+build step is needed. The launcher builds the headless Kites CLI, installs the
+Python API dependencies in `.venv`, and starts the web server.
 
-### Ubuntu(for only ubuntu-22.04 and above)
-- Run chmod +x for the Kites AppImage.
-- Run the file.
+### macOS with Homebrew
 
-### Windows
-- All the required files are inside the zip file, so you can just run the file.
-- In case you get popup regarding some missing dll please contact us.
+Install Qt 6.9.2 or later, CMake, and Python 3.10 or later, then run:
 
-## MacOS
-- Put Kites in the application 
-
-RUN
-
-```bash
-sudo xattr -rd com.apple.quarantine sudo xattr -rd com.apple.quarantine /path/to/application.app
-
+```sh
+brew install qt cmake
+./web_api/run.sh
 ```
 
-## Building
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Stop the server with
+`Ctrl+C` in the terminal.
 
-To build Kites you will first neet to install Qt(version above 6.9)
-Then simply build using
+If Qt is installed outside Homebrew, set `CMAKE_PREFIX_PATH` to the Qt
+installation prefix before starting the launcher:
 
-```bash
-cmake -DCMAKE_PREFIX_PATH="path/to/Qt/6.x.x/<compiler>" ..
+```sh
+CMAKE_PREFIX_PATH=/path/to/Qt/6.9.2/macos ./web_api/run.sh
 ```
 
-## Testing
+### Start the API after building it
 
-See [docs/TESTING.md](TESTING) for how to build and run tests, including coverage reports.
+If the CLI and Python dependencies are already installed, start the API
+directly from the repository root:
 
-## CLI
+```sh
+KITES_CLI="$PWD/build/web_api/kites-cli" \
+  .venv/bin/python -m uvicorn web_api.main:app --host 127.0.0.1 --port 8000
+```
 
-See [docs/CLI.md](docs/CLI.md) for how to build and use the headless command-line executable.
+For backend auto-reload during development, add `--reload`. The API health
+check is at `/api/health`; interactive API documentation is at `/docs`.
+
+## Use the web simulator
+
+1. Start the API and open `http://127.0.0.1:8000`.
+2. Edit the assembly in **Editor**, or use **Load example**.
+3. Choose a processor model and set the execution pace with the slider.
+4. Select **Run program**. The compiled instruction list appears beside the
+   editor, with the current instruction highlighted as the program executes.
+5. Click an instruction's breakpoint marker to pause before that address.
+6. View integer, floating-point, and CSR values in the register panel. The
+   execution output panel includes console, disassembly, and memory results.
+
+The API URL field in the top bar can point the frontend at a different running
+Kites API. The web frontend files are in [`web/`](web/), and the API and launch
+script are in [`web_api/`](web_api/).
+
+## Build the desktop application
+
+The desktop application requires Qt 6.9.2 or later. Configure CMake with the Qt
+installation prefix, then build from the configured build directory:
+
+```sh
+cmake -S . -B build -DCMAKE_PREFIX_PATH="/path/to/Qt/6.9.2/<platform>"
+cmake --build build
+```
+
+## CLI, tests, and contribution
+
+- [CLI usage](docs/CLI.md)
+- [Testing guide](docs/TESTING.md)
+- [Contributing](CONTRIBUTING.md)
+- [Web API details](web_api/README.md)
+
+Prebuilt desktop releases are available on the
+[GitHub Releases page](https://github.com/hghit-harshit/Kites/releases).
