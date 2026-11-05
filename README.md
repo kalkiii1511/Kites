@@ -1,43 +1,63 @@
-# KITES : RISC - V SIMULATOR
+# Kites RISC-V Simulator
 
-Kites a is RISC V simulator and assembly code editor built for RISC V ISA.
-Kites support I,M,D and F extenstion in single cyle mod and I,M extension in 5 Stage pipelining mode.(D,F will be added in future releases).
+Kites is a RISC-V simulator and assembly editor. The `rvss` single-cycle processor supports the I, M, F, and D extensions. The five-stage processor variants support I and M.
 
-## Downloading and Installation
+## Requirements
 
-Prebuilt libraries are available for Linux,Windows on [Release Page](https://github.com/hghit-harshit/Kites/releases)
+- C++20 compiler
+- CMake 3.19 or newer
+- Qt 6.9 or newer
+- Node.js 20 or newer and npm (for the web simulator)
 
-### Ubuntu(for only ubuntu-22.04 and above)
-- Run chmod +x for the Kites AppImage.
-- Run the file.
+## Run the web simulator
 
-### Windows
-- All the required files are inside the zip file, so you can just run the file.
-- In case you get popup regarding some missing dll please contact us.
+The web interface uses the Kites C++ engine through a local HTTP API. Start the API and the frontend in two separate terminals from the project directory.
 
-## MacOS
-- Put Kites in the application 
+### 1. Build the API
 
-RUN
+Set the Qt path to the Qt installation for your platform and compiler. If CMake already finds Qt, omit `CMAKE_PREFIX_PATH`.
 
 ```bash
-sudo xattr -rd com.apple.quarantine sudo xattr -rd com.apple.quarantine /path/to/application.app
-
+cmake -S . -B build \
+  -DCMAKE_PREFIX_PATH="/path/to/Qt/6.9.2/your-kit" \
+  -DDISABLE_GUI=ON
+cmake --build build --target kites_web_api -j2
 ```
 
-## Building
-
-To build Kites you will first neet to install Qt(version above 6.9)
-Then simply build using
+### 2. Start the API
 
 ```bash
-cmake -DCMAKE_PREFIX_PATH="path/to/Qt/6.x.x/<compiler>" ..
+KITES_DATA_DIR=.kites-data ./build/kites-web-api 8080
 ```
 
-## Testing
+The API listens at `http://127.0.0.1:8080`. Keep this terminal open. On Windows, run `build\kites-web-api.exe 8080` and set `KITES_DATA_DIR` using the shell’s environment variable syntax.
 
-See [docs/TESTING.md](TESTING) for how to build and run tests, including coverage reports.
+### 3. Start the frontend
 
-## CLI
+In a second terminal:
 
-See [docs/CLI.md](docs/CLI.md) for how to build and use the headless command-line executable.
+```bash
+cd frontend
+npm install
+VITE_KITES_API=http://127.0.0.1:8080 npm run dev -- --port 5173
+```
+
+Open [http://localhost:5173](http://localhost:5173). Keep both the API and frontend running while using the simulator.
+
+The Editor’s **Run** control assembles the current source and steps through its instructions. Use the speed slider to adjust playback. The execution panel shows each instruction’s address, encoding, and source line. Datapath and cache visualizations are not connected yet.
+
+For API endpoints and integration details, see [WEB_SIMULATOR.md](WEB_SIMULATOR.md).
+
+## Desktop application
+
+Prebuilt Linux and Windows releases are available on the [Kites releases page](https://github.com/hghit-harshit/Kites/releases). To build the desktop application, install Qt 6.9 or newer, then configure and build with CMake:
+
+```bash
+cmake -S . -B build -DCMAKE_PREFIX_PATH="/path/to/Qt/6.x/your-kit"
+cmake --build build -j2
+```
+
+## Other documentation
+
+- [Testing](docs/TESTING.md)
+- [CLI](docs/CLI.md)

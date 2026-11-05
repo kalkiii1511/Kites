@@ -10,6 +10,11 @@ namespace
 {
 std::filesystem::path getWritableDataDirectory()
 {
+    if (const char *dataDirectory = std::getenv("KITES_DATA_DIR");
+        dataDirectory != nullptr && *dataDirectory != '\0')
+    {
+        return std::filesystem::path(dataDirectory);
+    }
 #ifdef __APPLE__
     if (const char *home = std::getenv("HOME"); home != nullptr && *home != '\0')
     {

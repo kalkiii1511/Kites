@@ -148,3 +148,9 @@ if(ENABLE_TESTS)
     enable_testing()
     add_subdirectory(test)
 endif()
+
+# Headless HTTP API used by the React web simulator.
+add_executable(kites_web_api web_api/main.cpp)
+target_link_libraries(kites_web_api PRIVATE kites_core Qt::Core Qt::Network)
+target_compile_definitions(kites_web_api PRIVATE DISABLE_GUI)
+set_target_properties(kites_web_api PROPERTIES OUTPUT_NAME "kites-web-api")

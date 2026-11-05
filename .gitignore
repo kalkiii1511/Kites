@@ -1,25 +1,35 @@
-.idea/
+# Build output
+/build/
+/cmake-build-debug/
 CMakeCache.txt
-vm_state/
-CLAUDE.md
-*.log
-.zed/
-.cache/
+
+# Web frontend dependencies, generated types, and output
+/frontend/node_modules/
+/frontend/dist/
+/frontend/*.tsbuildinfo
+
+# Local simulator state
+/vm_state/
+/.kites-data/
+
+# IDE and editor files
+.idea/
 .vscode/
+.zed/
+.vs/
 examples/.vscode/
 .VSCodeCounter/
-build/
+.cph
+*.autosave
+CMakeLists.txt.user
+
+# Logs, generated test files, and local notes
+*.log
+.cache/
+CLAUDE.md
+TODO.md
+ss.py
 test/test.txt
 test/testex
 Jsons/
-TODO.md
-ss.py
-cmake-build-debug/
-TODO.md
-*.autosave
-CMakeLists.txt.user
-/vm_state
-.cph
-gtest_filter.
-.vs/
-gtest_filter.py
+gtest_filter*
