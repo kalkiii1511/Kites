@@ -197,19 +197,18 @@ void ProcessorManager::run()
     }
 }
 
-void ProcessorManager::step()
+bool ProcessorManager::step()
 {
     try
     {
-        if (!m_currentProcessor->StepAndNotify())
-        {
-            // program finished while stepping, let the run thread exit so the ui resets
-            m_currentProcessor->RequestStop();
-        }
+        // Reaching the end of the program is a completed step, not a reset.
+        // Leave registers and memory intact so the UI can inspect the final state.
+        return !m_currentProcessor->StepAndNotify();
     }
     catch (const std::exception &e)
     {
         emit runErrorSignal(QString::fromStdString(e.what()), resolveCurrentSourceLine());
+        return false;
     }
 }
 

@@ -74,6 +74,7 @@ private:
     QTcpServer server_;
     ProcessorManager manager_;
     bool programLoaded_{false};
+    bool programFinished_{false};
     QString lastRunError_;
 
     void readRequest(QTcpSocket *socket) {
@@ -101,7 +102,7 @@ private:
             QJsonObject result;
             int status = 200;
             if (method == "GET" && url.path() == "/api/health") {
-                result = {{"ok", true}, {"engine", "Kites"}, {"vm", "rvss"}, {"programLoaded", programLoaded_}};
+                result = {{"ok", true}, {"engine", "Kites"}, {"vm", "rvss"}, {"programLoaded", programLoaded_}, {"programComplete", programFinished_}};
             } else if (method == "POST" && url.path() == "/api/program/assemble") {
                 const auto json = parseJson(body);
                 const QString vm = json.value("vm").toString("rvss");
@@ -112,6 +113,7 @@ private:
                 manager_.reset();
                 manager_.loadProgram(source);
                 programLoaded_ = true;
+                programFinished_ = false;
                 result = state();
                 QJsonArray instructions;
                 const auto &program = manager_.getCurrentProgram();
@@ -136,21 +138,24 @@ private:
                 const auto json = parseJson(body);
                 const int count = std::clamp(json.value("count").toInt(1), 1, 1000);
                 lastRunError_.clear();
-                for (int i = 0; i < count; ++i) {
-                    manager_.step();
+                for (int i = 0; i < count && !programFinished_; ++i) {
+                    programFinished_ = manager_.step();
                     if (!lastRunError_.isEmpty()) throw std::runtime_error(lastRunError_.toStdString());
                 }
                 result = state();
-                result.insert("message", "Kites executed step request");
+                result.insert("message", programFinished_ ? "Program execution complete" : "Kites executed step request");
             } else if (method == "POST" && url.path() == "/api/simulator/run") {
                 requireProgram();
                 lastRunError_.clear();
                 manager_.run();
                 if (!lastRunError_.isEmpty()) throw std::runtime_error(lastRunError_.toStdString());
+                programFinished_ = true;
                 result = state();
                 result.insert("message", "Kites run completed");
             } else if (method == "POST" && url.path() == "/api/simulator/reset") {
                 manager_.reset();
+                programLoaded_ = false;
+                programFinished_ = false;
                 result = state();
                 result.insert("message", "Simulator reset");
             } else if (method == "GET" && url.path() == "/api/state") {
@@ -210,7 +215,7 @@ private:
                 {"stallCycles", static_cast<qint64>(manager_.getStallCycles())},
                 {"branchMispredictions", static_cast<qint64>(manager_.getBranchMispredictions())},
                 {"cpi", manager_.getCPI()}, {"ipc", manager_.getIPC()},
-                {"programLoaded", programLoaded_}};
+                {"programLoaded", programLoaded_}, {"programComplete", programFinished_}};
     }
 
     static void send(QTcpSocket *socket, int status, const QJsonObject &object) {

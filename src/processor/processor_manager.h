@@ -39,7 +39,7 @@ public:
     void loadProgram(const AssembledProgram &program);
     void loadProgram(const std::string &sourceText);
     void run();
-    void step();
+    bool step();
     void debugRun();
     void stop();
     void pause();
