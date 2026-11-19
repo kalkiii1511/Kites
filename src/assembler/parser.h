@@ -26,7 +26,7 @@ namespace Kites
 struct ParseError
 {
     unsigned int line;   ///< The line number where the error occurred.
-    unsigned int column; ///< The column number where the error occurred.
+    unsigned int column = 1; ///< The column number where the error occurred.
     std::string message; ///< The error message.
 
     /**
@@ -35,6 +35,11 @@ struct ParseError
      * @param message The error message.
      */
     ParseError(unsigned int line, std::string message) : line(line), message(std::move(message))
+    {
+    }
+
+    ParseError(unsigned int line, unsigned int column, std::string message)
+        : line(line), column(column), message(std::move(message))
     {
     }
 };

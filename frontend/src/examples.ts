@@ -16,6 +16,8 @@ import rv64imfdPipelineSmokeTest from './examples/rv64imfd_pipeline_smoke_test.s
 import rv64imfdSmokeTest from './examples/rv64imfd_smoke_test.s?raw';
 import stringOperations from './examples/string_operations.s?raw';
 import branchPrediction from './examples/branch_prediction.s?raw';
+import cacheTest from './examples/cache_test.s?raw';
+import cachePeakStress from './examples/cache_peak_stress.s?raw';
 
 export type Example = {
   title: string;
@@ -118,5 +120,15 @@ export const examples: Example[] = [
     title: 'String Operations',
     description: 'Demonstrates string length, copying, and reversing.',
     source: stringOperations,
+  },
+  {
+    title: 'Cache Locality Test',
+    description: 'Repeats loads within two data cache lines to show cold misses and cache hits.',
+    source: cacheTest,
+  },
+  {
+    title: 'Cache Capacity & Write Stress',
+    description: 'Streams, repeats, writes, and rereads a 256-byte working set to exercise cache capacity and write policies.',
+    source: cachePeakStress,
   },
 ];

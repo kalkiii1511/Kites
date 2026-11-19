@@ -109,7 +109,7 @@ void Parser::parseDataDirective()
             {
                 align(8);
             }
-            else if (peekToken(1).value == "string")
+            else if (peekToken(1).value == "string" || peekToken(1).value == "asciz")
             {
                 align(1);
             }
@@ -121,10 +121,10 @@ void Parser::parseDataDirective()
             {
                 recordError(ParseError(currentToken().line_number,
                                        "Invalid directive: Expected .dword, .word, .halfword, "
-                                       ".byte, .float, .double, .string, .zero"));
+                                       ".byte, .float, .double, .string, .asciz, .zero"));
                 errors_.all_errors.emplace_back(errors::SyntaxError(
                     "Invalid directive",
-                    "Expected .dword, .word, .halfword, .byte, .float, .double, .string, .zero",
+                    "Expected .dword, .word, .halfword, .byte, .float, .double, .string, .asciz, .zero",
                     filename_, currentToken().line_number, currentToken().column_number,
                     GetLineFromFile(filename_, currentToken().line_number)));
             }
@@ -266,7 +266,7 @@ void Parser::parseDataDirective()
                 nextToken();
             }
         }
-        else if (currentToken().value == "string")
+        else if (currentToken().value == "string" || currentToken().value == "asciz")
         {
             nextToken();
             while (currentToken().type != TokenType::EOF_ &&
@@ -290,10 +290,10 @@ void Parser::parseDataDirective()
         {
             recordError(ParseError(currentToken().line_number,
                                    "Invalid directive: Expected .dword, .word, .halfword, .byte, "
-                                   ".string, .float, .double, .zero"));
+                                   ".string, .asciz, .float, .double, .zero"));
             errors_.all_errors.emplace_back(errors::SyntaxError(
                 "Invalid directive",
-                "Expected .dword, .word, .halfword, .byte, .string, .float, .double, .zero",
+                "Expected .dword, .word, .halfword, .byte, .string, .asciz, .float, .double, .zero",
                 filename_, currentToken().line_number, currentToken().column_number,
                 GetLineFromFile(filename_, currentToken().line_number)));
             nextToken();
@@ -584,7 +584,14 @@ void Parser::parse()
     // first pass: skip sections and directives and collect labels in data section and bss section
     while (currentToken().type != TokenType::EOF_)
     {
-        if (currentToken().value == "section" && currentToken().type == TokenType::DIRECTIVE)
+        if ((currentToken().value == "globl" || currentToken().value == "global") &&
+            currentToken().type == TokenType::DIRECTIVE)
+        {
+            // Symbol visibility has no linking effect in the single-file simulator.
+            // Accept the directive and ignore its symbol operands.
+            skipCurrentLine();
+        }
+        else if (currentToken().value == "section" && currentToken().type == TokenType::DIRECTIVE)
         {
             nextToken();
         }
@@ -628,7 +635,12 @@ void Parser::parse()
 
     while (currentToken().type != TokenType::EOF_)
     {
-        if (currentToken().value == "section" && currentToken().type == TokenType::DIRECTIVE)
+        if ((currentToken().value == "globl" || currentToken().value == "global") &&
+            currentToken().type == TokenType::DIRECTIVE)
+        {
+            skipCurrentLine();
+        }
+        else if (currentToken().value == "section" && currentToken().type == TokenType::DIRECTIVE)
         {
             nextToken();
         }

@@ -57,6 +57,10 @@ type MachineState = {
 };
 type AssembleResponse = MachineState & { message: string; instructions: InstructionRow[] };
 type StepResponse = MachineState & { message: string };
+type Diagnostic = { line: number; column: number; message: string };
+type CacheConfigView = { setCount: number; lineSizeInBytes: number; wayCount: number; writePolicy: string; allocationPolicy: string; replacementPolicy: string };
+type CacheLineView = { set: number; way: number; tag: string; valid: boolean; dirty: boolean; data: string };
+type CacheView = { id: string; name: string; config: CacheConfigView; stats: { hits: number; misses: number; writeBacks: number; hitRate: number; missRate: number; sizeBytes: number }; lines: CacheLineView[] };
 type ToastTone = 'danger' | 'forward' | 'control';
 type HazardView = { title: string; detail: string; tone: ToastTone };
 type HazardLogEntry = HazardView & { id: string; cycle: number };
@@ -132,6 +136,44 @@ const addressKey = (address: string) => {
     return address;
   }
 };
+const registerPattern = /^(?:x(?:[12]?\d|3[01]|0)|f(?:[12]?\d|3[01]|0)|zero|ra|sp|gp|tp|t[0-6]|s(?:[0-9]|1[01])|a[0-7]|f[ast](?:[0-9]|1[01])|ft(?:[0-9]|1[01])|fs(?:[0-9]|1[01])|fa[0-7])$/i;
+const instructionNames = new Set(('add addi addiw addw sub subw mul mulh mulhsu mulhu div divu divw divuw rem remu remw remuw and andi or ori xor xori sll slli slliw sllw srl srli srliw srlw sra srai sraiw sraw slt slti sltu sltiu lui auipc jal jalr beq bne blt bge bltu bgeu lb lbu lh lhu lw lwu ld sb sh sw sd fence fence.i ecall ebreak nop li la mv not neg seqz snez sltz sgtz j jr ret call tail push pop ble bgt bleu bgtu bgtz blez bgez bltz csrrw csrrs csrrc csrrwi csrrsi csrrci mret sret wfi flw fld fsw fsd fadd.s fadd.d fsub.s fsub.d fmul.s fmul.d fdiv.s fdiv.d fsqrt.s fsqrt.d fmin.s fmin.d fmax.s fmax.d feq.s feq.d flt.s flt.d fle.s fle.d fmv.x.w fmv.x.d fmv.w.x fmv.d.x fcvt.w.s fcvt.w.d fcvt.s.w fcvt.d.w fcvt.l.s fcvt.l.d fcvt.s.l fcvt.d.l fcvt.wu.s fcvt.wu.d fcvt.s.wu fcvt.d.wu fclass.s fclass.d fsgnj.s fsgnj.d fsgnjn.s fsgnjn.d fsgnjx.s fsgnjx.d').split(' '));
+function fallbackDiagnostics(source: string): Diagnostic[] {
+  const found: Diagnostic[] = [];
+  source.split('\n').forEach((sourceLine, index) => {
+    const line = sourceLine.replace(/#.*/, '').replace(/;.*/, '');
+    const trimmed = line.trimStart();
+    if (!trimmed || trimmed.startsWith('.')) return;
+    const instructionText = trimmed.replace(/^[A-Za-z_.$][\w.$]*:\s*/, '');
+    if (!instructionText || instructionText.startsWith('.')) return;
+    const match = /^([A-Za-z_.$][\w.$]*)/.exec(instructionText);
+    if (!match) return;
+    const opcode = match[1];
+    if (instructionNames.has(opcode.toLowerCase())) return;
+    const column = sourceLine.indexOf(opcode) + 1;
+    found.push({ line: index + 1, column, message: `Unknown instruction "${opcode}"` });
+  });
+  return found;
+}
+function highlightLine(line: string, labels: Set<string>) {
+  const pieces = line.match(/#[^\n]*|;[^\n]*|"(?:\\.|[^"\\])*"|\.[A-Za-z][\w.]*|[A-Za-z_.$][\w.$]*:|[A-Za-z_.$][\w.$]*|-?(?:0[xX][\da-fA-F]+|\d+(?:\.\d+)?)|\s+|[^\s]/g) ?? [];
+  let instructionSeen = false;
+  return pieces.map((piece, index) => {
+    let kind = '';
+    if (piece.startsWith('#') || piece.startsWith(';')) kind = 'comment';
+    else if (piece.startsWith('"')) kind = 'string';
+    else if (piece.startsWith('.')) kind = 'directive';
+    else if (/^[A-Za-z_.$][\w.$]*:$/.test(piece)) kind = 'label';
+    else if (/^-?(?:0[xX][\da-fA-F]+|\d)/.test(piece)) kind = 'number';
+    else if (/^[A-Za-z_.$][\w.$]*$/.test(piece)) {
+      if (registerPattern.test(piece)) kind = 'register';
+      else if (!instructionSeen && instructionNames.has(piece.toLowerCase())) { kind = 'instruction'; instructionSeen = true; }
+      else if (labels.has(piece)) kind = 'label-ref';
+      else if (!instructionSeen && !/^\s/.test(piece)) instructionSeen = true;
+    }
+    return <span className={kind ? `syntax-${kind}` : undefined} key={index}>{piece}</span>;
+  });
+}
 const registerLabel = (hazard: HazardState) => hazard.fpr
   ? (fAbi[hazard.register] ?? `f${hazard.register}`)
   : (gAbi[hazard.register] ?? `x${hazard.register}`);
@@ -209,8 +251,11 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   });
   const data = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-  if (!response.ok)
-    throw new Error(data.error ?? `HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(data.error ?? `HTTP ${response.status}`) as Error & { diagnostics?: Diagnostic[] };
+    error.diagnostics = data.diagnostics;
+    throw error;
+  }
   return data as T;
 }
 
@@ -264,6 +309,11 @@ function App() {
   const [running, setRunning] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
   const examplesWrapRef = useRef<HTMLDivElement>(null);
+  const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+  const [cacheLevels, setCacheLevels] = useState<CacheView[]>([]);
+  const [cacheLevel, setCacheLevel] = useState('l1');
+  const [cacheConfig, setCacheConfig] = useState<CacheConfigView>({ setCount: 1, lineSizeInBytes: 16, wayCount: 2, writePolicy: 'write-through', allocationPolicy: 'no-write-allocate', replacementPolicy: 'LRU' });
+  const [cacheBusy, setCacheBusy] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const [hazardLog, setHazardLog] = useState<HazardLogEntry[]>([]);
   // Hazard callouts, log, popups and stage rings can be hidden on demand; the choice
@@ -292,6 +342,7 @@ function App() {
   const speedRef = useRef(5);
   const lastHazardKey = useRef('');
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const syntaxRef = useRef<HTMLPreElement>(null);
   const lineGutterRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadedEnd = useRef<bigint>(0n);
@@ -302,6 +353,13 @@ function App() {
     const s = await api<MachineState>('/api/state');
     setMachine(normalizeState(s));
   }, []);
+  const loadCache = useCallback(async () => {
+    const result = await api<{ levels: CacheView[] }>('/api/cache');
+    setCacheLevels(result.levels);
+    const selected = result.levels.find(level => level.id === cacheLevel);
+    if (selected)
+      setCacheConfig(selected.config);
+  }, [cacheLevel]);
   const refreshHealth = useCallback(async () => {
     try {
       await api('/api/health');
@@ -327,6 +385,32 @@ function App() {
     const timer = window.setInterval(() => void refreshHealth(), 3000);
     return () => window.clearInterval(timer);
   }, [refreshHealth]);
+  useEffect(() => {
+    if (tab !== 'Cache' || !connected)
+      return;
+    void loadCache().catch(e => setMessage((e as Error).message));
+  }, [tab, connected, loadCache]);
+  useEffect(() => {
+    if (!code.trim()) {
+      setDiagnostics([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void api<{ diagnostics: Diagnostic[] }>('/api/diagnostics', {
+        method: 'POST',
+        body: JSON.stringify({ source: code }),
+        signal: controller.signal,
+      }).then(result => setDiagnostics(result.diagnostics))
+        .catch(error => {
+          if (controller.signal.aborted)
+            return;
+          const message = (error as Error).message;
+          setDiagnostics(message.includes('404') || message.includes('Endpoint not found') ? fallbackDiagnostics(code) : []);
+        });
+    }, 450);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [code]);
   const visibleMemoryBytes = () => Math.max(256, Math.ceil((window.innerHeight - 200) / 25) * 16);
 
   //--- loads memory ---
@@ -368,6 +452,13 @@ function App() {
 
   const regs = useMemo<Reg[]>(() => gAbi.map((abi, i) => ({ name: `x${i}`, abi, value: asBig(machine.gpr[`x${i}`]) })), [machine.gpr]);
   const fregs = useMemo<Reg[]>(() => fAbi.map((abi, i) => ({ name: `f${i}`, abi, value: asBig(machine.fpr[`f${i}`]) })), [machine.fpr]);
+  const labels = useMemo(() => new Set(code.split('\n').map(line => /^\s*([A-Za-z_.$][\w.$]*):/.exec(line)?.[1]).filter((label): label is string => !!label)), [code]);
+  const diagnosticsByLine = useMemo(() => {
+    const map = new Map<number, Diagnostic[]>();
+    diagnostics.forEach(item => map.set(item.line, [...(map.get(item.line) ?? []), item]));
+    return map;
+  }, [diagnostics]);
+  const selectedCache = cacheLevels.find(level => level.id === cacheLevel);
   const showValue = (r: Reg) => {
     if (format === 'Decimal')
       return r.value.toString();
@@ -518,7 +609,11 @@ function App() {
       setTab('Editor');
     }
     catch (e) {
-      setMessage(`Assembly error: ${(e as Error).message}`);
+      const error = e as Error & { diagnostics?: Diagnostic[] };
+      const issues = error.diagnostics?.length ? error.diagnostics : fallbackDiagnostics(code);
+      if (issues.length)
+        setDiagnostics(issues);
+      setMessage(`Assembly error: ${issues[0] ? `Line ${issues[0].line}: ${issues[0].message}` : error.message}`);
     }
     finally {
       setBusy(false);
@@ -534,6 +629,7 @@ function App() {
       setMachine(normalizeState(s));
       activateState(s);
       setMessage(s.programComplete ? 'Execution complete' : s.message);
+      void loadCache().catch(() => {});
     }
     catch (e) {
       setMessage((e as Error).message);
@@ -591,12 +687,17 @@ function App() {
         setMessage('Execution stopped');
     }
     catch (e) {
-      setMessage(`Run error: ${(e as Error).message}`);
+      const error = e as Error & { diagnostics?: Diagnostic[] };
+      const issues = error.diagnostics?.length ? error.diagnostics : fallbackDiagnostics(code);
+      if (issues.length)
+        setDiagnostics(issues);
+      setMessage(`Run error: ${issues[0] ? `Line ${issues[0].line}: ${issues[0].message}` : error.message}`);
     }
     finally {
       runActive.current = false;
       setRunning(false);
       setBusy(false);
+      void loadCache().catch(() => {});
     }
   };
   const reset = async () => {
@@ -610,6 +711,7 @@ function App() {
       setToast(null);
       lastHazardKey.current = '';
       setMessage(s.message);
+      void loadCache().catch(() => {});
     }
     catch (e) {
       setMessage((e as Error).message);
@@ -713,8 +815,40 @@ function App() {
     };
   }, [examplesOpen]);
 
+  const syncEditorScroll = () => {
+    if (!editorRef.current || !syntaxRef.current)
+      return;
+    syntaxRef.current.scrollTop = editorRef.current.scrollTop;
+    syntaxRef.current.scrollLeft = editorRef.current.scrollLeft;
+    if (lineGutterRef.current)
+      lineGutterRef.current.scrollTop = editorRef.current.scrollTop;
+  };
+  const chooseCacheLevel = (levelId: string) => {
+    setCacheLevel(levelId);
+    const level = cacheLevels.find(item => item.id === levelId);
+    if (level)
+      setCacheConfig(level.config);
+  };
+  const configureCache = async () => {
+    setCacheBusy(true);
+    try {
+      await api(`/api/cache/config`, {
+        method: 'POST',
+        body: JSON.stringify({ level: cacheLevel, ...cacheConfig }),
+      });
+      await loadCache();
+      setMessage(`${selectedCache?.name ?? 'Cache'} reconfigured`);
+    }
+    catch (e) {
+      setMessage((e as Error).message);
+    }
+    finally {
+      setCacheBusy(false);
+    }
+  };
   const loadExample = (example: Example) => {
     setCode(example.source);
+    setDiagnostics([]);
     if (example.vm) setVm(example.vm);
     if (example.predictor) setPredictor(example.predictor);
     setExamplesOpen(false);
@@ -794,27 +928,34 @@ function App() {
                 const stages = stagesByLine.get(i + 1) ?? [];
                 const color = stages.length ? stageColors[stages[0]] : undefined;
                 return <div
-                  className={currentSourceLine === i + 1 ? 'active' : ''}
+                  className={`${currentSourceLine === i + 1 ? 'active' : ''} ${diagnosticsByLine.has(i + 1) ? 'has-error' : ''}`}
                   key={i}
-                  title={stages.length ? `Active stage: ${stages.join(', ')}` : undefined}
+                  title={diagnosticsByLine.get(i + 1)?.map(item => item.message).join('\n') ?? (stages.length ? `Active stage: ${stages.join(', ')}` : undefined)}
                   style={color ? { boxShadow: `inset 3px 0 ${color}`, background: `${color}14`, color } : undefined}
-                >{i + 1}</div>;
+                >{diagnosticsByLine.has(i + 1) ? '● ' : ''}{i + 1}</div>;
               })}
             </div>
+            <pre ref={syntaxRef} className="syntax-layer" aria-hidden="true" style={highlightStyle}>{code.split('\n').map((line, i) => <div className={`syntax-line ${diagnosticsByLine.has(i + 1) ? 'error-line' : ''}`} key={i}>{highlightLine(line, labels)}</div>)}</pre>
             <textarea
               ref={editorRef}
+              wrap="off"
               spellCheck={false}
               value={code}
-              onChange={e => setCode(e.target.value)}
-              onScroll={e => {
-                // Keep the line-number gutter locked to the code's vertical scroll.
-                if (lineGutterRef.current)
-                  lineGutterRef.current.scrollTop = e.currentTarget.scrollTop;
-              }}
+              onChange={e => { setDiagnostics([]); setCode(e.target.value); }}
+              onScroll={syncEditorScroll}
               aria-label="Assembly editor"
-              style={highlightStyle}
             />
           </div>
+          {diagnostics.length > 0 && <div className="editor-diagnostics" role="status">
+            <b>{diagnostics.length} assembly issue{diagnostics.length === 1 ? '' : 's'}</b>
+            {diagnostics.slice(0, 4).map((item, i) => <button key={`${item.line}-${item.column}-${i}`} title={item.message} onClick={() => {
+              const lineTop = Math.max(0, (item.line - 1) * 21 - 80);
+              if (editorRef.current) editorRef.current.scrollTop = lineTop;
+              if (lineGutterRef.current) lineGutterRef.current.scrollTop = lineTop;
+              syncEditorScroll();
+            }}>Line {item.line}: {item.message}</button>)}
+            {diagnostics.length > 4 && <span>and {diagnostics.length - 4} more</span>}
+          </div>}
           <div className="result">
             <div className="result-head">
               <b>Execution flow</b>
@@ -1005,7 +1146,43 @@ function App() {
             {!loadingMemory && <div className="load-note">Scroll down to load the next memory page</div>}
           </div>
         </>}
-        {tab === 'Cache' && <div className="placeholder"><MemoryStick size={28} /><b>Cache</b><span>Cache visualization is not yet exposed by the Kites web API.</span></div>}
+        {tab === 'Cache' && <div className="cache-view">
+          <div className="panel-head cache-head">
+            <div><div className="panel-title">Cache hierarchy</div><span className="datapath-sub">Configure cache geometry and inspect the live cache lines.</span></div>
+            <select value={cacheLevel} onChange={e => chooseCacheLevel(e.target.value)}>
+              <option value="instruction">Instruction</option><option value="l1">L1 Data</option><option value="l2">L2 Unified</option>
+            </select>
+          </div>
+          <div className="cache-scroll">
+            {selectedCache && <>
+              <div className="cache-config">
+                <label>Sets<select value={cacheConfig.setCount} onChange={e => setCacheConfig(config => ({ ...config, setCount: Number(e.target.value) }))}>{[1, 2, 4, 8, 16, 32, 64].map(value => <option key={value}>{value}</option>)}</select></label>
+                <label>Line size<select value={cacheConfig.lineSizeInBytes} onChange={e => setCacheConfig(config => ({ ...config, lineSizeInBytes: Number(e.target.value) }))}>{[4, 8, 16, 32, 64].map(value => <option key={value} value={value}>{value} bytes</option>)}</select></label>
+                <label>Ways<select value={cacheConfig.wayCount} onChange={e => setCacheConfig(config => ({ ...config, wayCount: Number(e.target.value) }))}>{[1, 2, 4, 8].map(value => <option key={value}>{value}</option>)}</select></label>
+                <label>Replacement<select value={cacheConfig.replacementPolicy} onChange={e => setCacheConfig(config => ({ ...config, replacementPolicy: e.target.value }))}><option>LRU</option><option>FIFO</option></select></label>
+                <label>Write hit<select value={cacheConfig.writePolicy} onChange={e => setCacheConfig(config => ({ ...config, writePolicy: e.target.value }))}><option value="write-through">Write-through</option><option value="write-back">Write-back</option></select></label>
+                <label>Write miss<select value={cacheConfig.allocationPolicy} onChange={e => setCacheConfig(config => ({ ...config, allocationPolicy: e.target.value }))}><option value="write-allocate">Write-allocate</option><option value="no-write-allocate">No-write-allocate</option></select></label>
+                <button className="primary" disabled={cacheBusy || !connected} onClick={() => void configureCache()}>{cacheBusy ? 'Applying…' : 'Apply'}</button>
+              </div>
+              <div className="cache-stats">
+                <div><span>Capacity</span><b>{selectedCache.stats.sizeBytes} B</b></div>
+                <div><span>Hits</span><b>{selectedCache.stats.hits}</b></div>
+                <div><span>Misses</span><b>{selectedCache.stats.misses}</b></div>
+                <div><span>Hit rate</span><b>{(selectedCache.stats.hitRate * 100).toFixed(1)}%</b></div>
+                <div><span>Write backs</span><b>{selectedCache.stats.writeBacks}</b></div>
+              </div>
+              <div className="cache-table-wrap">
+                <table className="cache-table"><thead><tr><th>SET</th><th>WAY</th><th>TAG</th><th>STATE</th><th>DATA (HEX)</th></tr></thead>
+                  <tbody>{selectedCache.lines.map(line => <tr key={`${line.set}-${line.way}`} className={line.valid ? 'cache-valid' : ''}>
+                    <td>{line.set}</td><td>{line.way}</td><td><code>{line.tag}</code></td>
+                    <td>{line.valid ? <>{line.dirty ? 'Dirty' : 'Clean'}</> : 'Invalid'}</td><td><code className="cache-data">{line.valid ? line.data.match(/.{1,2}/g)?.join(' ') : '—'}</code></td>
+                  </tr>)}</tbody>
+                </table>
+              </div>
+            </>}
+            {!selectedCache && <div className="instruction-empty">{connected ? 'Loading cache data…' : 'Connect to the Kites API to inspect the cache.'}</div>}
+          </div>
+        </div>}
       </section>
       <aside className="register-panel">
         <div className="reg-head"><b>Register</b><select value={format} onChange={e => setFormat(e.target.value as typeof format)}><option value="Hex">Hexadecimal</option><option value="Decimal">Decimal</option><option value="Float">Float</option><option value="Double">Double</option></select></div>

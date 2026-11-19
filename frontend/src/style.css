@@ -352,6 +352,7 @@ body {
 }
 
 .editor-wrap {
+    position: relative;
     display: flex;
     flex: 1;
     min-height: 230px;
@@ -372,14 +373,88 @@ body {
 
 .editor-wrap textarea {
     flex: 1;
+    min-width: 0;
     border: 0;
     outline: 0;
     resize: none;
     padding: 9px 12px;
     font: 12px/21px 'DM Mono', monospace;
-    color: #243247;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    caret-color: #243247;
+    background: transparent;
     white-space: pre;
-    tab-size: 4
+    tab-size: 4;
+    position: relative;
+    z-index: 1
+}
+
+.syntax-layer {
+    position: absolute;
+    inset: 0 0 0 42px;
+    margin: 0;
+    padding: 9px 12px;
+    overflow: hidden;
+    color: #243247;
+    font: 12px/21px 'DM Mono', monospace;
+    white-space: pre;
+    tab-size: 4;
+    pointer-events: none
+}
+
+.syntax-line {
+    height: 21px
+}
+
+.syntax-line.error-line {
+    text-decoration: underline wavy #ef4444;
+    text-underline-offset: 3px
+}
+
+.syntax-comment { color: #82909f; font-style: italic }
+.syntax-string { color: #15803d }
+.syntax-directive { color: #7c3aed; font-weight: 600 }
+.syntax-label,
+.syntax-label-ref { color: #b45309 }
+.syntax-instruction { color: #2563eb; font-weight: 600 }
+.syntax-register { color: #0f766e }
+.syntax-number { color: #c2410c }
+
+.line-nos>div.has-error {
+    color: #dc2626;
+    font-weight: 700
+}
+
+.editor-diagnostics {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 30px;
+    padding: 4px 10px;
+    border-top: 1px solid #fee2e2;
+    background: #fff7f7;
+    color: #b91c1c;
+    font-size: 9px;
+    flex-shrink: 0;
+    overflow-x: auto
+}
+
+.editor-diagnostics b { white-space: nowrap }
+.editor-diagnostics button {
+    border: 0;
+    padding: 2px 4px;
+    background: transparent;
+    color: #b91c1c;
+    font: inherit;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer
+}
+.editor-diagnostics button:hover { text-decoration: underline }
+.editor-diagnostics>span { white-space: nowrap; color: #7f1d1d }
+
+.line-nos>div {
+    white-space: nowrap
 }
 
 .result {
@@ -773,7 +848,7 @@ footer {
 }
 
 .editor-wrap textarea {
-    background-color: #fff
+    background-color: transparent
 }
 
 .controls button:disabled {
@@ -1329,6 +1404,124 @@ footer {
 
 .toast-close:hover {
     color: #475569
+}
+
+.cache-view {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0
+}
+
+.cache-head>div:first-child {
+    display: flex;
+    flex-direction: column;
+    gap: 2px
+}
+
+.cache-head select,
+.cache-config select {
+    border: 1px solid #dfe5ec;
+    border-radius: 4px;
+    padding: 5px 7px;
+    background: #fff;
+    color: #475569;
+    font: 10px Inter, system-ui, sans-serif
+}
+
+.cache-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px
+}
+
+.cache-config {
+    display: flex;
+    align-items: end;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #f8fafc
+}
+
+.cache-config label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: #64748b;
+    font-size: 9px
+}
+
+.cache-config .primary {
+    min-height: 28px
+}
+
+.cache-stats {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(72px, 1fr));
+    gap: 8px;
+    margin: 10px 0
+}
+
+.cache-stats>div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 9px 10px;
+    border: 1px solid #e2e8f0;
+    border-radius: 5px;
+    background: #fff
+}
+
+.cache-stats span {
+    color: #64748b;
+    font-size: 9px
+}
+
+.cache-stats b {
+    color: #1e293b;
+    font-size: 13px
+}
+
+.cache-table-wrap {
+    border: 1px solid #e2e8f0;
+    border-radius: 5px;
+    overflow: auto
+}
+
+.cache-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px
+}
+
+.cache-table th,
+.cache-table td {
+    padding: 7px 9px;
+    border-bottom: 1px solid #edf0f3;
+    text-align: left;
+    white-space: nowrap
+}
+
+.cache-table th {
+    position: sticky;
+    top: 0;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 8px;
+    letter-spacing: .06em
+}
+
+.cache-table td { color: #64748b }
+.cache-table tr.cache-valid td { color: #334155 }
+.cache-table code { font: 10px 'DM Mono', monospace }
+.cache-table .cache-data { color: #64748b }
+
+@media (max-width: 780px) {
+    .cache-stats { grid-template-columns: repeat(2, minmax(72px, 1fr)) }
 }
 
 @keyframes toastIn {

@@ -1,4 +1,5 @@
 #include "common/globals.h"
+#include "assembler/assembler.h"
 #include "processor/processor_manager.h"
 #include "processor/rv5s/rv5s_branch_predictor.h"
 #include "processor/processor_types.h"
@@ -18,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <limits>
 #include <sstream>
@@ -41,6 +43,60 @@ uint64_t parseAddress(const QString &text) {
     const qulonglong parsed = value.toULongLong(&ok, base);
     if (!ok) throw std::invalid_argument("Invalid memory address");
     return static_cast<uint64_t>(parsed);
+}
+
+QString writePolicyName(WritePolicy policy) {
+    return policy == WritePolicy::WriteBack ? QStringLiteral("write-back") : QStringLiteral("write-through");
+}
+
+QString allocationPolicyName(AllocationPolicy policy) {
+    return policy == AllocationPolicy::WriteAllocate ? QStringLiteral("write-allocate") : QStringLiteral("no-write-allocate");
+}
+
+QString replacementPolicyName(ReplacementPolicy policy) {
+    if (policy == ReplacementPolicy::FIFO) return QStringLiteral("FIFO");
+    if (policy == ReplacementPolicy::Custom) return QStringLiteral("Custom");
+    return QStringLiteral("LRU");
+}
+
+Cache *cacheForLevel(ProcessorManager &manager, const QString &level) {
+    auto *memory = manager.getMemoryController();
+    if (level == "instruction") return memory->getInstructionCache();
+    if (level == "l1") return memory->getL1Cache();
+    if (level == "l2") return memory->getL2Cache();
+    throw std::invalid_argument("Unknown cache level");
+}
+
+QJsonObject cacheSnapshot(Cache *cache, const QString &id, const QString &name) {
+    const CacheConfig config = cache->getConfig();
+    QJsonArray lines;
+    for (size_t set = 0; set < cache->getSetCount(); ++set) {
+        for (size_t way = 0; way < cache->getWayCount(); ++way) {
+            const CacheLine &line = cache->getCacheLine(set, way);
+            QString data;
+            data.reserve(static_cast<qsizetype>(line.data.size() * 2));
+            for (uint8_t byte : line.data)
+                data += QString::number(byte, 16).rightJustified(2, QLatin1Char('0'));
+            lines.append(QJsonObject{{"set", static_cast<qint64>(set)},
+                                     {"way", static_cast<qint64>(way)},
+                                     {"tag", QStringLiteral("0x") + QString::number(line.tag, 16)},
+                                     {"valid", line.valid}, {"dirty", line.dirty}, {"data", data}});
+        }
+    }
+    const QJsonObject configObject{{"setCount", static_cast<qint64>(config.lineCount)},
+                                   {"lineSizeInBytes", static_cast<qint64>(config.lineSizeInBytes)},
+                                   {"wayCount", static_cast<qint64>(config.wayCount)},
+                                   {"writePolicy", writePolicyName(config.writePolicy)},
+                                   {"allocationPolicy", allocationPolicyName(config.allocationPolicy)},
+                                   {"replacementPolicy", replacementPolicyName(config.replacementPolicy)}};
+    const QJsonObject statsObject{{"hits", static_cast<qint64>(cache->getHitCount())},
+                                  {"misses", static_cast<qint64>(cache->getMissCount())},
+                                  {"writeBacks", static_cast<qint64>(cache->getWriteBackCount())},
+                                  {"hitRate", cache->getHitRate()},
+                                  {"missRate", cache->getMissRate()},
+                                  {"sizeBytes", static_cast<qint64>(cache->getCacheSizeInBytes())}};
+    return QJsonObject{{"id", id}, {"name", name}, {"config", configObject},
+                       {"stats", statsObject}, {"lines", lines}};
 }
 
 ProcessorType parseVm(const QString &name) {
@@ -181,6 +237,51 @@ private:
             int status = 200;
             if (method == "GET" && url.path() == "/api/health") {
                 result = {{"ok", true}, {"engine", "Kites"}, {"vm", "rvss"}, {"programLoaded", programLoaded_}, {"programComplete", programFinished_}};
+            } else if (method == "POST" && url.path() == "/api/diagnostics") {
+                const auto json = parseJson(body);
+                std::istringstream source(json.value("source").toString().toStdString());
+                const auto diagnostics = getDiagnostics(source, "<editor>");
+                QJsonArray items;
+                for (const auto &diagnostic : diagnostics)
+                    items.append(QJsonObject{{"line", static_cast<int>(diagnostic.line)},
+                                             {"column", static_cast<int>(diagnostic.column)},
+                                             {"message", QString::fromStdString(diagnostic.message)}});
+                result = {{"diagnostics", items}};
+            } else if (method == "GET" && url.path() == "/api/cache") {
+                QJsonArray levels;
+                levels.append(cacheSnapshot(cacheForLevel(manager_, "instruction"), "instruction", "Instruction Cache"));
+                levels.append(cacheSnapshot(cacheForLevel(manager_, "l1"), "l1", "L1 Data Cache"));
+                levels.append(cacheSnapshot(cacheForLevel(manager_, "l2"), "l2", "L2 Unified Cache"));
+                result = {{"levels", levels}};
+            } else if (method == "POST" && url.path() == "/api/cache/config") {
+                const auto json = parseJson(body);
+                const int sets = json.value("setCount").toInt();
+                const int lineSize = json.value("lineSizeInBytes").toInt();
+                const int ways = json.value("wayCount").toInt();
+                if (sets < 1 || sets > 64 || lineSize < 4 || lineSize > 64 || ways < 1 || ways > 8 ||
+                    !std::has_single_bit(static_cast<unsigned int>(sets)) ||
+                    !std::has_single_bit(static_cast<unsigned int>(lineSize)) ||
+                    !std::has_single_bit(static_cast<unsigned int>(ways)))
+                    throw std::invalid_argument("Cache geometry must use supported power-of-two sizes");
+                const QString write = json.value("writePolicy").toString("write-through");
+                const QString allocation = json.value("allocationPolicy").toString("write-allocate");
+                const QString replacement = json.value("replacementPolicy").toString("LRU");
+                if ((write != "write-through" && write != "write-back") ||
+                    (allocation != "write-allocate" && allocation != "no-write-allocate") ||
+                    (replacement != "LRU" && replacement != "FIFO"))
+                    throw std::invalid_argument("Unsupported cache policy");
+                CacheConfig config{
+                    .lineCount = static_cast<size_t>(sets),
+                    .lineSizeInBytes = static_cast<size_t>(lineSize),
+                    .wayCount = static_cast<size_t>(ways),
+                    .writePolicy = write == "write-back" ? WritePolicy::WriteBack : WritePolicy::WriteThrough,
+                    .allocationPolicy = allocation == "write-allocate" ? AllocationPolicy::WriteAllocate : AllocationPolicy::NoWriteAllocate,
+                    .replacementPolicy = replacement == "FIFO" ? ReplacementPolicy::FIFO : ReplacementPolicy::LRU};
+                Cache *cache = cacheForLevel(manager_, json.value("level").toString());
+                cache->reconfigure(config);
+                result = cacheSnapshot(cache, json.value("level").toString(),
+                    json.value("level").toString() == "instruction" ? "Instruction Cache" :
+                    json.value("level").toString() == "l1" ? "L1 Data Cache" : "L2 Unified Cache");
             } else if (method == "POST" && url.path() == "/api/program/assemble") {
                 const auto json = parseJson(body);
                 const QString vm = json.value("vm").toString("rvss");
@@ -192,15 +293,22 @@ private:
                 if (source.empty()) throw std::invalid_argument("Assembly source is empty");
                 manager_.reset();
                 programLoaded_ = false;
+                programFinished_ = false;
                 try {
                     manager_.loadProgram(source);
-                } catch (const std::exception &e) {
-                    // Report the parser's own diagnostic (line + message) when available,
-                    // and leave the simulator unloaded so stale code cannot be stepped.
+                } catch (const std::exception &error) {
+                    std::istringstream diagnosticSource(source);
+                    QJsonArray items;
+                    for (const auto &diagnostic : getDiagnostics(diagnosticSource, "<editor>"))
+                        items.append(QJsonObject{{"line", static_cast<int>(diagnostic.line)},
+                                                 {"column", static_cast<int>(diagnostic.column)},
+                                                 {"message", QString::fromStdString(diagnostic.message)}});
+                    QString errorMessage = QString::fromUtf8(error.what());
                     const QString detail = firstParseError();
-                    if (!detail.isEmpty() && QString::fromStdString(e.what()).contains("Failed to "))
-                        throw std::runtime_error(QStringLiteral("Assembly failed at %1").arg(detail).toStdString());
-                    throw;
+                    if (!detail.isEmpty() && errorMessage.contains("Failed to "))
+                        errorMessage = QStringLiteral("Assembly failed at %1").arg(detail);
+                    send(socket, 400, {{"error", errorMessage}, {"diagnostics", items}});
+                    return;
                 }
                 programLoaded_ = true;
                 programFinished_ = false;

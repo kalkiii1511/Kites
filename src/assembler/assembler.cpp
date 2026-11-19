@@ -134,22 +134,28 @@ AssembledProgram assemble(std::istream& source)
 
 std::vector<ParseError> getDiagnostics(std::istream &source, const std::string &virtualFilename)
 {
-    // std::vector<ParseError> parseErrors{};
-
-    // Lexer lexer(source, virtualFilena);
-    // std::vector<Token> tokens = lexer.getTokenList();
-
-    // Parser parser(lexer.getFilename(), tokens);
-    // parser.parse();
-
-    // AssembledProgram program;
-    // program.filename = virtualFilename;
-
-    // if (parser.getErrorCount() != 0)
-    // {
-    //     parseErrors = parser.getErrors();
-    // }
-    
-    // return parseErrors;
+    try
+    {
+        Lexer lexer(source);
+        Parser parser(virtualFilename, lexer.getTokenList());
+        try
+        {
+            parser.parse();
+        }
+        catch (const std::exception &error)
+        {
+            // Parser's user-facing error formatting reads the source file by name.
+            // The editor supplies an in-memory stream, so keep the recorded line
+            // diagnostics even if that optional formatting step cannot open a file.
+            if (!parser.getErrors().empty())
+                return parser.getErrors();
+            return {ParseError(1, 1, error.what())};
+        }
+        return parser.getErrors();
+    }
+    catch (const std::exception &error)
+    {
+        return {ParseError(1, 1, error.what())};
+    }
 }
 }//namespace Kites
