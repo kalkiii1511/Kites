@@ -35,6 +35,13 @@ export const examples: Example[] = [
     source: matrixMultiply,
   },
   {
+    title: 'Branch Prediction · 2-bit BTB',
+    description: 'Three branches in a loop populate the BTB. RV5 H/F with the 2-bit predictor is selected automatically.',
+    source: branchPrediction,
+    vm: 'rv5-h-f',
+    predictor: '2bit',
+  },
+  {
     title: 'FP Compare & Convert',
     description: 'Exercises floating-point comparisons and conversion to integer registers.',
     source: pipelineFpCompareConvert,
@@ -108,13 +115,6 @@ export const examples: Example[] = [
     title: 'RV64IMAFD Smoke Test',
     description: 'Runs a compact mix of integer, multiply/divide, and floating-point instructions.',
     source: rv64imfdSmokeTest,
-  },
-  {
-    title: 'Branch Prediction · 2-bit BTB',
-    description: 'Three branches in a loop populate the BTB. RV5 H/F with the 2-bit predictor is selected automatically.',
-    source: branchPrediction,
-    vm: 'rv5-h-f',
-    predictor: '2bit',
   },
   {
     title: 'String Operations',
