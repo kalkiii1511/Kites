@@ -1,9 +1,11 @@
 #include "common/globals.h"
 #include "processor/processor_manager.h"
+#include "processor/rv5s/rv5s_branch_predictor.h"
 #include "processor/processor_types.h"
 #include "utils/utils.h"
 
 #include <QCoreApplication>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -48,6 +50,40 @@ ProcessorType parseVm(const QString &name) {
     if (name == "rv5-nh-f") return ProcessorType::RV5Stage_NH_F;
     if (name == "rv5-h-f") return ProcessorType::RV5Stage_H_F;
     throw std::invalid_argument("Unknown Kites VM type");
+}
+
+BranchPredictorType parseBranchPredictor(const QString &name) {
+    if (name.isEmpty() || name == "2bit") return BranchPredictorType::TwoBitBHT;
+    if (name == "static-nt" || name == "none") return BranchPredictorType::StaticNotTaken;
+    throw std::invalid_argument("Unknown branch predictor type");
+}
+
+QString branchPredictorToString(BranchPredictorType type) {
+    return type == BranchPredictorType::TwoBitBHT ? QStringLiteral("2bit")
+                                                  : QStringLiteral("static-nt");
+}
+
+QString firstParseError() {
+    QFile file(QString::fromStdString(globals::errors_dump_file_path.string()));
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    const QJsonArray errors = doc.object().value("errors").toArray();
+    if (errors.isEmpty()) return {};
+    const QJsonObject first = errors.first().toObject();
+    const int line = first.value("line").toInt();
+    const QString message = first.value("message").toString();
+    if (message.isEmpty()) return {};
+    return line > 0 ? QStringLiteral("line %1: %2").arg(line).arg(message) : message;
+}
+
+QString bhtStateLabel(uint8_t state) {
+    switch (state) {
+    case 0: return QStringLiteral("00 (Strongly Not Taken)");
+    case 1: return QStringLiteral("01 (Weakly Not Taken)");
+    case 2: return QStringLiteral("10 (Weakly Taken)");
+    case 3: return QStringLiteral("11 (Strongly Taken)");
+    default: return QStringLiteral("Unknown");
+    }
 }
 
 QString processorName(ProcessorType type) {
@@ -148,12 +184,24 @@ private:
             } else if (method == "POST" && url.path() == "/api/program/assemble") {
                 const auto json = parseJson(body);
                 const QString vm = json.value("vm").toString("rvss");
+                const QString predictor = json.value("branchPredictor").toString("2bit");
                 if (parseVm(vm) != manager_.getProcessorType()) manager_.changeProcessor(parseVm(vm));
+                manager_.setBranchPredictor(parseBranchPredictor(predictor));
                 manager_.setStepDelay(1);
                 const std::string source = json.value("source").toString().toStdString();
                 if (source.empty()) throw std::invalid_argument("Assembly source is empty");
                 manager_.reset();
-                manager_.loadProgram(source);
+                programLoaded_ = false;
+                try {
+                    manager_.loadProgram(source);
+                } catch (const std::exception &e) {
+                    // Report the parser's own diagnostic (line + message) when available,
+                    // and leave the simulator unloaded so stale code cannot be stepped.
+                    const QString detail = firstParseError();
+                    if (!detail.isEmpty() && QString::fromStdString(e.what()).contains("Failed to "))
+                        throw std::runtime_error(QStringLiteral("Assembly failed at %1").arg(detail).toStdString());
+                    throw;
+                }
                 programLoaded_ = true;
                 programFinished_ = false;
                 result = state();
@@ -274,11 +322,26 @@ private:
             }
         }
 
+        QJsonArray btbEntries;
+        for (const auto &row : manager_.getBranchPredictorEntries()) {
+            btbEntries.append(QJsonObject{{"index", static_cast<int>(row.index)},
+                                          {"pc", hex64(row.pc)},
+                                          {"target", hex64(row.target)},
+                                          {"counter", static_cast<int>(row.state)},
+                                          {"stateLabel", bhtStateLabel(row.state)},
+                                          {"unconditional", row.is_unconditional}});
+        }
+
         return {{"pc", hex64(manager_.getProgramCounter())}, {"gpr", gpr}, {"fpr", fpr},
                 {"csr", csr}, {"cycles", static_cast<qint64>(manager_.getCycles())},
                 {"instructionsRetired", static_cast<qint64>(manager_.getInstructionsRetired())},
                 {"stallCycles", static_cast<qint64>(manager_.getStallCycles())},
                 {"branchMispredictions", static_cast<qint64>(manager_.getBranchMispredictions())},
+                {"branchPredictor", branchPredictorToString(manager_.getBranchPredictorType())},
+                {"branchPredictions", static_cast<qint64>(manager_.getBranchPredictions())},
+                {"btbHits", static_cast<qint64>(manager_.getBTBHits())},
+                {"branchAccuracy", manager_.getBranchAccuracy()},
+                {"btbEntries", btbEntries},
                 {"cpi", manager_.getCPI()}, {"ipc", manager_.getIPC()},
                 {"programLoaded", programLoaded_}, {"programComplete", programFinished_},
                 {"processor", processorName(type)}, {"pipeline", pipelined},
