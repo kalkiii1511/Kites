@@ -87,6 +87,7 @@ struct ID_EX_Register
 struct EX_MEM_Register
 {
     uint64_t pc {INVALID_PC};           // Passing PC for highlighting purposes
+    uint64_t prev_pc {INVALID_PC};      // PC of the instruction that was here last cycle
     uint32_t instruction {NOP};  // Pass full instruction for reference in MEM
     // --- GPR Results ---
     uint64_t alu_result {0};  // GPR Write Data (ALU Result, Link Address, etc.)
@@ -120,6 +121,7 @@ struct EX_MEM_Register
     void reset()
     {
         pc          = INVALID_PC;
+        prev_pc     = INVALID_PC;
         instruction = NOP;
 
         alu_result = 0;
@@ -152,6 +154,7 @@ struct EX_MEM_Register
 struct MEM_WB_Register
 {
     uint64_t pc {INVALID_PC};           // Passing PC for highlighting purposes
+    uint64_t prev_pc {INVALID_PC};      // PC of the instruction that was here last cycle
     uint32_t instruction {NOP};  // Pass full instruction for reference in WB
     // --- GPR Results ---
     uint64_t memory_data {0};           // GPR Write Data (Data read from memory in a Load)
@@ -180,6 +183,7 @@ struct MEM_WB_Register
     void reset()
     {
         pc          = INVALID_PC;
+        prev_pc     = INVALID_PC;
         instruction = NOP;
 
         memory_data = 0;

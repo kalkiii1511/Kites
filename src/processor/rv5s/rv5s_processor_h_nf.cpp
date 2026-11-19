@@ -148,6 +148,10 @@ void RV5StageProcessorHNF::Step()
 {
     begin_step_delta();
 
+    // Keep the report visible while a multi-cycle stall is in progress.
+    const HazardReport previous_hazard = processor_state_.hazard;
+    processor_state_.hazard.reset();
+
     pipeline_writeback();
     pipeline_memory();
     pipeline_execute();
@@ -158,13 +162,24 @@ void RV5StageProcessorHNF::Step()
     if (currently_stalling)
     {
         stall_cycles_--;
+        if (!processor_state_.hazard.active())
+        {
+            processor_state_.hazard = previous_hazard;
+        }
+        processor_state_.hazard.stalled = true;
+        processor_state_.hazard.stallCycles = static_cast<int>(stall_cycles_) + 1;
     }
     else
     {
-        stalls_needed = check_data_hazard(if_id_reg_, id_ex_reg_, ex_mem_reg_, false);
+        const DataHazardReport hazard =
+            detect_data_hazard(if_id_reg_, id_ex_reg_, ex_mem_reg_, false);
+        stalls_needed = hazard.stalls;
         if (stalls_needed > 0)
         {
             stall_cycles_ = stalls_needed - 1;
+            report_hazard(hazard.loadUse ? HazardKind::LoadUse : HazardKind::Data,
+                          true, false, stalls_needed, hazard.producerPc, hazard.consumerPc,
+                          hazard.reg, hazard.fpr);
         }
     }
 
@@ -239,7 +254,13 @@ void RV5StageProcessorHNF::pipeline_execute()
     {
         alu_result = static_cast<uint64_t>(id_ex_reg_.imm << 12);
     }
+    else if ((cur_instruction & 0b1111111) == 0b0010111) // auipc
+    {
+        alu_result = id_ex_reg_.pc +
+                     static_cast<uint64_t>(static_cast<int64_t>(id_ex_reg_.imm) * 4096);
+    }
 
+    ex_mem_reg_.prev_pc = ex_mem_reg_.pc;
     ex_mem_reg_.prev_reg_write = ex_mem_reg_.reg_write;
     ex_mem_reg_.prev_rd = ex_mem_reg_.rd;
     ex_mem_reg_.prev_freg_write = ex_mem_reg_.freg_write;

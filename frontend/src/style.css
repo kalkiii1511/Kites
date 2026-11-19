@@ -273,6 +273,56 @@ body {
     gap: 6px
 }
 
+.examples-menu-row {
+    display: flex;
+    justify-content: flex-end;
+    padding: 5px 11px;
+    border-bottom: 1px solid #edf0f3;
+    flex-shrink: 0
+}
+
+.examples-menu {
+    width: min(290px, calc(100vw - 50px));
+    max-height: min(340px, 45vh);
+    overflow-y: auto;
+    padding: 4px;
+    border: 1px solid #dfe5ec;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, .08)
+}
+
+.example-option {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #334155;
+    text-align: left;
+    cursor: pointer
+}
+
+.example-option:hover,
+.example-option:focus-visible {
+    outline: 0;
+    background: #f1f5f9
+}
+
+.example-option b {
+    font-size: 10px;
+    font-weight: 600
+}
+
+.example-option span {
+    color: #64748b;
+    font-size: 9px;
+    line-height: 1.45
+}
+
 .small-btn,
 .primary {
     border: 1px solid #dfe5ec;
@@ -759,4 +809,522 @@ footer {
 
 .instruction-table tbody tr:hover td {
     background: #f1f5f9
+}
+/* ---------------------------------------------------------------------------
+   Pipeline, hazard, and datapath visualization
+   --------------------------------------------------------------------------- */
+
+.pause-mark {
+    width: 10px;
+    height: 12px;
+    border-left: 3px solid currentColor;
+    border-right: 3px solid currentColor;
+    opacity: .45
+}
+
+.result {
+    height: 56%;
+    min-height: 300px
+}
+
+.pipeline-strip {
+    display: flex;
+    gap: 6px;
+    padding: 3px 12px 7px;
+    overflow-x: auto;
+    flex-shrink: 0;
+    scrollbar-width: thin
+}
+
+.pipeline-strip.single-stage {
+    max-width: 250px
+}
+
+.stage-card {
+    --stage-color: #64748b;
+    flex: 1;
+    min-width: 92px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 5px 8px 6px;
+    border: 1px solid #e2e8f0;
+    border-top: 3px solid var(--stage-color);
+    border-radius: 5px;
+    background: #fff;
+    transition: box-shadow .15s ease, background .15s ease
+}
+
+.stage-card.idle {
+    opacity: .48;
+    border-top-color: #cbd5e1
+}
+
+.stage-card.active {
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .08)
+}
+
+.stage-card.hazard {
+    border-color: #fca5a5;
+    border-top-color: #dc2626;
+    background: #fff7f7;
+    animation: hazardPulse 1.2s ease-in-out infinite
+}
+
+.stage-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between
+}
+
+.stage-name {
+    font: 700 9px Inter, system-ui, sans-serif;
+    letter-spacing: .09em;
+    color: var(--stage-color)
+}
+
+.stage-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--stage-color)
+}
+
+.stage-card.idle .stage-dot {
+    background: #cbd5e1
+}
+
+.stage-pc {
+    font: 9px 'DM Mono', monospace;
+    color: #334155;
+    white-space: nowrap
+}
+
+.stage-instruction {
+    font: 9px 'DM Mono', monospace;
+    color: #475569;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis
+}
+
+.stage-line {
+    font: 8px Inter, system-ui, sans-serif;
+    color: #94a3b8
+}
+
+@keyframes hazardPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0) }
+    50% { box-shadow: 0 0 0 3px rgba(220, 38, 38, .12) }
+}
+
+.hazard-callout {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0 12px 6px;
+    padding: 7px 9px;
+    border: 1px solid #fecaca;
+    border-radius: 5px;
+    background: #fef2f2;
+    color: #991b1b;
+    flex-shrink: 0
+}
+
+.hazard-callout svg {
+    flex-shrink: 0;
+    margin-top: 1px
+}
+
+.hazard-callout>div {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0
+}
+
+.hazard-callout b {
+    font-size: 10px
+}
+
+.hazard-callout span {
+    font-size: 9.5px;
+    line-height: 1.4;
+    color: #7f1d1d
+}
+
+.hazard-callout.forward {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+    color: #166534
+}
+
+.hazard-callout.forward span {
+    color: #14532d
+}
+
+.hazard-callout.control {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8
+}
+
+.hazard-callout.control span {
+    color: #1e40af
+}
+
+.stats-strip {
+    gap: 14px;
+    padding: 5px 12px;
+    flex-shrink: 0
+}
+
+.stats-strip span {
+    white-space: nowrap
+}
+
+.hazard-stat.active b {
+    color: #dc2626;
+    font-weight: 700
+}
+
+.mode-note {
+    display: flex;
+    gap: 8px;
+    padding: 0 12px 6px;
+    font-size: 9px;
+    color: #64748b;
+    flex-shrink: 0
+}
+
+.mode-note b {
+    color: #334155;
+    white-space: nowrap;
+    font-weight: 600
+}
+
+.mode-note span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap
+}
+
+.instruction-table th:nth-child(5),
+.instruction-table td:nth-child(5) {
+    width: 88px
+}
+
+.stage-pills {
+    display: flex;
+    gap: 3px;
+    align-items: center
+}
+
+.stage-pill {
+    padding: 1px 5px;
+    border: 1px solid;
+    border-radius: 3px;
+    font: 700 8px Inter, system-ui, sans-serif;
+    letter-spacing: .05em
+}
+
+.stage-pills-empty {
+    color: #cbd5e1
+}
+
+.instruction-table tbody tr.active {
+    background: #eff6ff
+}
+
+.instruction-table tbody tr.active td {
+    color: #1e40af;
+    font-weight: 500
+}
+
+.instruction-table tbody tr.focused td {
+    background: #f1f5f9
+}
+
+/* Datapath tab */
+
+.datapath {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: auto
+}
+
+.datapath-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid #edf0f3
+}
+
+.datapath-sub {
+    display: block;
+    margin-top: 3px;
+    font-size: 10px;
+    color: #64748b
+}
+
+.pipeline-state {
+    flex-shrink: 0;
+    padding: 3px 8px;
+    border-radius: 20px;
+    font: 600 9px Inter, system-ui, sans-serif;
+    letter-spacing: .04em;
+    text-transform: uppercase
+}
+
+.pipeline-state.pipeline {
+    color: #1d4ed8;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe
+}
+
+.pipeline-state.single {
+    color: #047857;
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0
+}
+
+.datapath-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    min-height: 0
+}
+
+.datapath-flow {
+    display: flex;
+    align-items: stretch;
+    gap: 8px
+}
+
+.datapath-flow.five .stage-card {
+    flex: 1;
+    min-height: 92px;
+    padding: 8px 10px
+}
+
+.datapath-flow.one {
+    max-width: 280px
+}
+
+.datapath-flow.one .stage-card {
+    flex: 1;
+    min-height: 92px;
+    padding: 8px 10px
+}
+
+.datapath-idle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 10px;
+    border: 1px solid #e2e8f0;
+    border-radius: 5px;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 10px
+}
+
+.idle-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #22c55e
+}
+
+.mode-card {
+    padding: 10px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #f8fafc
+}
+
+.mode-card-title {
+    font-size: 10px;
+    font-weight: 600;
+    color: #334155
+}
+
+.mode-card p {
+    margin: 4px 0 0;
+    font-size: 9.5px;
+    line-height: 1.55;
+    color: #64748b
+}
+
+.hazard-log {
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    overflow: hidden
+}
+
+.hazard-log-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-bottom: 1px solid #edf0f3;
+    background: #f8fafc;
+    font-size: 10px;
+    color: #334155
+}
+
+.hazard-log-head span {
+    font-size: 9px;
+    color: #94a3b8
+}
+
+.hazard-log-empty {
+    padding: 12px;
+    color: #94a3b8;
+    font-size: 9.5px
+}
+
+.hazard-log-row {
+    display: grid;
+    grid-template-columns: 72px 132px 1fr;
+    gap: 8px;
+    align-items: start;
+    padding: 6px 10px;
+    border-top: 1px solid #f1f5f9;
+    font-size: 9.5px;
+    line-height: 1.45;
+    color: #475569
+}
+
+.hazard-log-row:first-of-type {
+    border-top: 0
+}
+
+.hazard-log-row b {
+    color: #b91c1c;
+    font-weight: 600
+}
+
+.hazard-log-row.forward b {
+    color: #15803d
+}
+
+.hazard-log-row.control b {
+    color: #1d4ed8
+}
+
+.hazard-log-cycle {
+    font: 9px 'DM Mono', monospace;
+    color: #94a3b8
+}
+
+.stage-legend {
+    display: flex;
+    gap: 14px;
+    font-size: 9px;
+    color: #64748b
+}
+
+.stage-legend span {
+    display: flex;
+    align-items: center;
+    gap: 4px
+}
+
+.stage-legend i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px
+}
+
+/* Hazard toast */
+
+.hazard-toast {
+    position: fixed;
+    right: 18px;
+    bottom: 40px;
+    z-index: 50;
+    width: min(400px, calc(100vw - 36px));
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 11px 12px;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, .16);
+    animation: toastIn .2s ease-out
+}
+
+.hazard-toast.forward {
+    border-color: #bbf7d0
+}
+
+.hazard-toast.control {
+    border-color: #bfdbfe
+}
+
+.toast-icon {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: #fef2f2;
+    color: #dc2626
+}
+
+.hazard-toast.forward .toast-icon {
+    background: #f0fdf4;
+    color: #16a34a
+}
+
+.hazard-toast.control .toast-icon {
+    background: #eff6ff;
+    color: #2563eb
+}
+
+.toast-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0
+}
+
+.toast-copy b {
+    font-size: 11px;
+    color: #0f172a
+}
+
+.toast-copy span {
+    font-size: 10px;
+    line-height: 1.45;
+    color: #475569
+}
+
+.toast-close {
+    flex-shrink: 0;
+    padding: 2px;
+    border: 0;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer
+}
+
+.toast-close:hover {
+    color: #475569
+}
+
+@keyframes toastIn {
+    from { opacity: 0; transform: translateY(8px) }
+    to { opacity: 1; transform: none }
 }

@@ -50,6 +50,48 @@ ProcessorType parseVm(const QString &name) {
     throw std::invalid_argument("Unknown Kites VM type");
 }
 
+QString processorName(ProcessorType type) {
+    switch (type) {
+    case ProcessorType::RVSS: return "RVSS single-cycle";
+    case ProcessorType::RV5Stage_NH_NF: return "RV5 pipeline — no hazard detection, no forwarding";
+    case ProcessorType::RV5Stage_H_NF: return "RV5 pipeline — hazard detection, no forwarding";
+    case ProcessorType::RV5Stage_NH_F: return "RV5 pipeline — no hazard detection, forwarding";
+    case ProcessorType::RV5Stage_H_F: return "RV5 pipeline — hazard detection, forwarding";
+    default: return "Kites processor";
+    }
+}
+
+const char *stageName(int index) {
+    static const char *names[] = {"IF", "ID", "EX", "MEM", "WB"};
+    return index >= 0 && index < 5 ? names[index] : "?";
+}
+
+QString hazardKindName(HazardKind kind) {
+    switch (kind) {
+    case HazardKind::Data: return "data";
+    case HazardKind::LoadUse: return "load-use";
+    case HazardKind::Control: return "control";
+    default: return "none";
+    }
+}
+
+QString pcStringFor(uint64_t pc) {
+    return pc == INVALID_PC ? QString() : hex64(pc);
+}
+
+QJsonObject hazardJson(const HazardReport &hazard) {
+    const auto pcString = [](uint64_t pc) { return pc == INVALID_PC ? QString() : hex64(pc); };
+    return {{"active", hazard.active()},
+            {"type", hazardKindName(hazard.kind)},
+            {"stalled", hazard.stalled},
+            {"forwarded", hazard.forwarded},
+            {"stalls", hazard.stallCycles},
+            {"sourcePc", pcString(hazard.sourcePc)},
+            {"consumerPc", pcString(hazard.consumerPc)},
+            {"register", static_cast<int>(hazard.registerIndex)},
+            {"fpr", hazard.isFpr}};
+}
+
 class WebApi final : public QObject {
     Q_OBJECT
 public:
@@ -209,13 +251,39 @@ private:
         }
         for (const auto &[name, address] : csr_to_address)
             csr.insert(QString::fromStdString(name), hex64(registers->ReadCsr(static_cast<size_t>(address))));
+        const ProcessorType type = manager_.getProcessorType();
+        const ProcessorState &processorState = manager_.getProcessorState();
+        const bool pipelined = type != ProcessorType::RVSS;
+
+        const uint64_t programSize = static_cast<uint64_t>(manager_.getCurrentProgram().text_buffer.size()) * 4;
+        QJsonArray stages;
+        if (!pipelined) {
+            const uint64_t pc = programFinished_ && processorState.lastExecutedPC != INVALID_PC
+                ? processorState.lastExecutedPC
+                : manager_.getProgramCounter();
+            stages.append(QJsonObject{{"stage", "EX"}, {"pc", hex64(pc)}, {"valid", true}});
+        } else {
+            for (int i = 0; i < 5; ++i) {
+                const uint64_t pc = i < static_cast<int>(processorState.programCounters.size())
+                    ? processorState.programCounters[static_cast<size_t>(i)]
+                    : INVALID_PC;
+                const bool valid = pc != INVALID_PC && pc < programSize;
+                stages.append(QJsonObject{{"stage", stageName(i)},
+                                          {"pc", valid ? hex64(pc) : QString()},
+                                          {"valid", valid}});
+            }
+        }
+
         return {{"pc", hex64(manager_.getProgramCounter())}, {"gpr", gpr}, {"fpr", fpr},
                 {"csr", csr}, {"cycles", static_cast<qint64>(manager_.getCycles())},
                 {"instructionsRetired", static_cast<qint64>(manager_.getInstructionsRetired())},
                 {"stallCycles", static_cast<qint64>(manager_.getStallCycles())},
                 {"branchMispredictions", static_cast<qint64>(manager_.getBranchMispredictions())},
                 {"cpi", manager_.getCPI()}, {"ipc", manager_.getIPC()},
-                {"programLoaded", programLoaded_}, {"programComplete", programFinished_}};
+                {"programLoaded", programLoaded_}, {"programComplete", programFinished_},
+                {"processor", processorName(type)}, {"pipeline", pipelined},
+                {"stages", stages}, {"hazard", hazardJson(processorState.hazard)},
+                {"lastExecutedPc", pcStringFor(processorState.lastExecutedPC)}};
     }
 
     static void send(QTcpSocket *socket, int status, const QJsonObject &object) {

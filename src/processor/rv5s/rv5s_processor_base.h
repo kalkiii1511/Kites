@@ -72,6 +72,12 @@ class RV5StageVM_Base : public ProcessorBase
     void begin_step_delta();
     void finalize_step_delta();
 
+    // Fill processor_state_.hazard for the current cycle. The web UI / GUI uses
+    // this to show why the pipeline stalled or forwarded a value.
+    void report_hazard(HazardKind kind, bool stalled, bool forwarded, int stallCycles,
+                       uint64_t sourcePc, uint64_t consumerPc, uint8_t reg = 0,
+                       bool fpr = false);
+
     void print_pipeline_registers_debug();
     bool is_pipeline_drained() const;
     void setProcessorState() override;

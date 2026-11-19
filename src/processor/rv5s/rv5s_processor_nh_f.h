@@ -8,6 +8,7 @@
 
 #include "processor/pipeline_registers.h"
 #include "processor/rv5s/rv5s_control_unit.h"
+#include "processor/rv5s/rv5s_hdu.h"
 #include "processor/rv5s/rv5s_processor_base.h"
 #include <iostream>
 #include <stack>

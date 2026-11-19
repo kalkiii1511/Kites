@@ -16,8 +16,11 @@ void RV5StageVM_Base::Run()
         }
 
         // if we hit a break point (and it's a new PC), we pause execution
-        // This prevents firing the same breakpoint multiple times during stalls
-        if (std::find(breakpoints_.begin(), breakpoints_.end(), program_counter_) !=
+        // This prevents firing the same breakpoint multiple times during stalls.
+        // Breakpoints at or past program_size_ are end-of-program markers, not places to
+        // pause: the pipeline still has to drain, so pausing there deadlocks a free run.
+        if (program_counter_ < program_size_ &&
+            std::find(breakpoints_.begin(), breakpoints_.end(), program_counter_) !=
                 breakpoints_.end() && program_counter_ != last_breakpoint_pc_)
         {
             pause_requested_ = true;
@@ -154,6 +157,20 @@ void RV5StageVM_Base::finalize_step_delta()
     }
 }
 
+void RV5StageVM_Base::report_hazard(HazardKind kind, bool stalled, bool forwarded,
+                                   int stallCycles, uint64_t sourcePc, uint64_t consumerPc,
+                                   uint8_t reg, bool fpr)
+{
+    processor_state_.hazard.kind          = kind;
+    processor_state_.hazard.stalled       = stalled;
+    processor_state_.hazard.forwarded     = forwarded;
+    processor_state_.hazard.stallCycles   = stallCycles;
+    processor_state_.hazard.sourcePc      = sourcePc;
+    processor_state_.hazard.consumerPc    = consumerPc;
+    processor_state_.hazard.registerIndex = reg;
+    processor_state_.hazard.isFpr         = fpr;
+}
+
 void RV5StageVM_Base::setProcessorState()
 {
     // processor_state_.programCounters[toIndex(PipelineStage::IF)]  = program_counter_;
@@ -161,8 +178,9 @@ void RV5StageVM_Base::setProcessorState()
     // processor_state_.programCounters[toIndex(PipelineStage::EX)]  = id_ex_reg_.pc;
     // processor_state_.programCounters[toIndex(PipelineStage::MEM)] = ex_mem_reg_.pc;
     // processor_state_.programCounters[toIndex(PipelineStage::WB)]  = mem_wb_reg_.pc;
-    processor_state_.programCounters = 
-    {program_counter_, if_id_reg_.pc, id_ex_reg_.pc, ex_mem_reg_.pc, mem_wb_reg_.pc};
+    processor_state_.programCounters =
+        {program_counter_, if_id_reg_.pc, id_ex_reg_.pc, ex_mem_reg_.pc, mem_wb_reg_.pc};
+    processor_state_.lastExecutedPC = last_executed_pc_;
 }
 
 void RV5StageVM_Base::pipeline_decode()
@@ -432,11 +450,15 @@ void RV5StageVM_Base::pipeline_memory()
         if_id_reg_.reset();
         id_ex_reg_.reset();
         branch_mispredictions_++;
+        // A taken branch is a control hazard: the two instructions fetched behind it
+        // are discarded and refetched from the target.
+        report_hazard(HazardKind::Control, false, false, 2, ex_mem_reg_.pc, INVALID_PC);
     }
 
     // since we are running cycle backward
     // by the time execture check this register forwarding previous results are gone
     // so we store these seperately
+    mem_wb_reg_.prev_pc          = mem_wb_reg_.pc;
     mem_wb_reg_.prev_rd          = mem_wb_reg_.rd;
     mem_wb_reg_.prev_alu_result  = mem_wb_reg_.alu_result;
     mem_wb_reg_.prev_mem_to_reg  = mem_wb_reg_.mem_to_reg;

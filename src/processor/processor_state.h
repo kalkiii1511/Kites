@@ -1,79 +1,55 @@
 #pragma once
+#include "processor/processor_constants.h"
 #include "processor/processor_types.h"
 #include "utils/to_index.h"
-#include <vector>
 #include <cstdint>
 #include <string>
 #include <vector>
+
 namespace Kites
 {
-// enum class PipelineStage
-// {
-//     IF,
-//     ID,
-//     EX,
-//     MEM,
-//     WB,
-//     PipelineStageCount
-// };
+// The reason a pipelined processor had to alter its normal flow this cycle.
+enum class HazardKind
+{
+    None,
+    Data,      // register dependency detected by the hazard detection unit
+    LoadUse,   // load followed immediately by a dependent instruction
+    Control,   // branch/jump changed the fetch stream
+};
 
-// inline std::string pipelineStageToString(PipelineStage stage)
-// {
-//     switch (stage)
-//     {
-//     case PipelineStage::IF:
-//         return "IF";
-//     case PipelineStage::ID:
-//         return "ID";
-//     case PipelineStage::EX:
-//         return "EX";
-//     case PipelineStage::MEM:
-//         return "MEM";
-//     case PipelineStage::WB:
-//         return "WB";
-//     default:
-//         return "";
-//     }
-// }
-// struct PipelineData
-// {
-//     std::array<std::string, toIndex(PipelineStage::PipelineStageCount)> instructionTexts{};
-//     std::array<uint64_t, toIndex(PipelineStage::PipelineStageCount)> sourceLineNumbers{};
-//     std::array<uint64_t, toIndex(PipelineStage::PipelineStageCount)> disassemblyLineNumbers{};
-// };
+// Per-cycle hazard information attached to ProcessorState. The GUI/web API uses this
+// to explain stalls and forwarding instead of only exposing a stall counter.
+struct HazardReport
+{
+    HazardKind kind{HazardKind::None};
+    bool stalled{false};
+    bool forwarded{false};
+    int stallCycles{0};
+    // Instruction that produces the value (INVALID_PC when unknown).
+    uint64_t sourcePc{INVALID_PC};
+    // Instruction that consumes the value (INVALID_PC when unknown).
+    uint64_t consumerPc{INVALID_PC};
+    uint8_t registerIndex{0};
+    bool isFpr{false};
 
-// struct ProcessorStatistics
-// {
-//     uint64_t cycleCount{};
-//     uint64_t instructionsRetiredCount{};
-//     uint64_t branchMispredictionCount{};
-//     uint64_t stallCycleCount{};
-//     double cpi{};
-//     double ipc{};
-// };
+    bool active() const { return kind != HazardKind::None; }
 
-// struct SingleStageProcessorState
-// {
-//     uint64_t programCounter{};
-// };
-
-// struct FiveStageProcessorState
-// {
-//     std::array<uint64_t, toIndex(PipelineStage::PipelineStageCount)> programCounters{};
-//     bool isStalled{};
-// };
-
-// using ProcessorState = std::variant<SingleStageProcessorState, FiveStageProcessorState>;
+    void reset() { *this = HazardReport{}; }
+};
 
 struct ProcessorState
 {
     std::vector<uint64_t> programCounters;
-    uint64_t lastExecutedPC;
+    uint64_t lastExecutedPC{INVALID_PC};
+    HazardReport hazard;
+
     void reset()
     {
         programCounters.assign(programCounters.size(), 0);
+        lastExecutedPC = INVALID_PC;
+        hazard.reset();
     }
-    //for further extension we can add more fields here
+    // for further extension we can add more fields here
     // tho beware if this struct is too big we lose on performance
 };
 

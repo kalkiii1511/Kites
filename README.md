@@ -44,7 +44,7 @@ VITE_KITES_API=http://127.0.0.1:8080 npm run dev -- --port 5173
 
 Open [http://localhost:5173](http://localhost:5173). Keep both the API and frontend running while using the simulator.
 
-The Editor’s **Run** control assembles the current source and steps through its instructions. Use the speed slider to adjust playback. The execution panel shows each instruction’s address, encoding, and source line. Datapath and cache visualizations are not connected yet.
+The Editor’s **Run** control assembles the current source and steps through its instructions. Use the speed slider to adjust playback. The execution panel highlights every instruction active in the pipeline, labels the IF/ID/EX/MEM/WB stages, and reports stalls, forwarding, and branch flushes. The **Datapath** tab shows the same live five-stage state with a hazard activity log. Cache visualization is not connected yet.
 
 For API endpoints and integration details, see [WEB_SIMULATOR.md](WEB_SIMULATOR.md).
 

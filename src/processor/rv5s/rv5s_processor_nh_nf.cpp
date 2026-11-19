@@ -167,6 +167,7 @@ void RV5StageProcessorNHNF::Reset()
 void RV5StageProcessorNHNF::Step()
 {
     begin_step_delta();
+    processor_state_.hazard.reset();
 
     pipeline_writeback();
     pipeline_memory();
@@ -241,8 +242,14 @@ void RV5StageProcessorNHNF::pipeline_execute()
     {
         alu_result = static_cast<uint64_t>(id_ex_reg_.imm << 12);
     }
+    else if ((id_ex_reg_.instruction & 0b1111111) == 0b0010111) // auipc
+    {
+        alu_result = id_ex_reg_.pc +
+                     static_cast<uint64_t>(static_cast<int64_t>(id_ex_reg_.imm) * 4096);
+    }
 
     // Latch data for EX/MEM Register
+    ex_mem_reg_.prev_pc = ex_mem_reg_.pc;
     ex_mem_reg_.prev_reg_write = ex_mem_reg_.reg_write;
     ex_mem_reg_.prev_rd = ex_mem_reg_.rd;
     ex_mem_reg_.prev_freg_write = ex_mem_reg_.freg_write;

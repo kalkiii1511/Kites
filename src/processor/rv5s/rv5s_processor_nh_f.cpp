@@ -173,6 +173,7 @@ void RV5StageProcessorNHF::Reset()
 void RV5StageProcessorNHF::Step()
 {
     begin_step_delta();
+    processor_state_.hazard.reset();
 
     // 1. Execute stages (WB -> MEM -> EX -> ID -> IF)
     pipeline_writeback();
@@ -311,6 +312,11 @@ void RV5StageProcessorNHF::pipeline_execute()
         {
             alu_result = static_cast<uint64_t>(id_ex_reg_.imm << 12);
         }
+        else if ((id_ex_reg_.instruction & 0b1111111) == 0b0010111) // auipc
+        {
+            alu_result = id_ex_reg_.pc +
+                         static_cast<uint64_t>(static_cast<int64_t>(id_ex_reg_.imm) * 4096);
+        }
 
         // Latch data for EX/MEM Register
 
@@ -326,8 +332,25 @@ void RV5StageProcessorNHF::pipeline_execute()
                                                      : mem_wb_reg_.prev_alu_result;
         }
         ex_mem_reg_.reg2_data = store_data;
+
+        // Report the dependency that the forwarding unit just resolved. This is
+        // purely observational: the ALU inputs above are unchanged. Report A and B
+        // together only when they come from the same producer; otherwise report A
+        // so the source/register pair stays consistent.
+        const InstructionSources used = instruction_sources(instruction);
+        const bool report_a = forward_a != 0 && used.gpr_rs1;
+        const bool report_b = forward_b != 0 && used.gpr_rs2;
+        if (report_a || report_b)
+        {
+            const bool use_a = report_a;
+            const uint8_t level = use_a ? forward_a : forward_b;
+            const uint64_t source_pc = level == 2 ? ex_mem_reg_.pc : mem_wb_reg_.prev_pc;
+            report_hazard(HazardKind::Data, false, true, 0, source_pc, id_ex_reg_.pc,
+                          use_a ? id_ex_reg_.rs1 : id_ex_reg_.rs2, false);
+        }
     }
 
+    ex_mem_reg_.prev_pc = ex_mem_reg_.pc;
     ex_mem_reg_.prev_reg_write = ex_mem_reg_.reg_write;
     ex_mem_reg_.prev_rd = ex_mem_reg_.rd;
     ex_mem_reg_.prev_freg_write = ex_mem_reg_.freg_write;

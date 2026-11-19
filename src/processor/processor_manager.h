@@ -34,7 +34,7 @@ class ProcessorManager : public QObject
 public:
     ProcessorManager(QObject *parent = nullptr, ProcessorType vmType = ProcessorType::RVSS);
     void changeProcessor(ProcessorType vmType);
-    ProcessorType getProcessorType();
+    ProcessorType getProcessorType() const;
     void reset();
     void loadProgram(const AssembledProgram &program);
     void loadProgram(const std::string &sourceText);
@@ -58,6 +58,7 @@ public:
     CircuitScene *getCircuitScene() const;
     const Profiler* getProfiler() const;
     const AssembledProgram &getCurrentProgram() const { return m_currentProgram; }
+    const ProcessorState &getProcessorState() const;
 
     // gui calls these functions to get the current state of the vm
     // maybe instead we should bundle the stats in a struct and the return just 

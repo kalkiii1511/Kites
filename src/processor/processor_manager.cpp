@@ -255,6 +255,11 @@ void ProcessorManager::setBreakpoints(const std::vector<uint64_t> &breakpoints)
     m_currentProcessor->SetBreakpoints(breakpoints);
 }
 
+const ProcessorState &ProcessorManager::getProcessorState() const
+{
+    return m_currentProcessor->processor_state_;
+}
+
 RegisterFile *ProcessorManager::getRegisterFile() const
 {
     return &m_currentProcessor->registers_;
@@ -274,7 +279,7 @@ void ProcessorManager::reset()
     m_currentProcessor->Reset();
 }
 
-ProcessorType ProcessorManager::getProcessorType()
+ProcessorType ProcessorManager::getProcessorType() const
 {
     return m_currentProcessorType;
 }

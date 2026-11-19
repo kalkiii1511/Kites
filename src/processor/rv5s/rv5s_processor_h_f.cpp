@@ -203,6 +203,10 @@ void RV5StageProcessorHF::Step()
 {
     begin_step_delta();
 
+    // Keep the report visible while a multi-cycle stall is in progress.
+    const HazardReport previous_hazard = processor_state_.hazard;
+    processor_state_.hazard.reset();
+
     // 1. Execute back stages (WB -> MEM -> EX)
     pipeline_writeback();
     pipeline_memory();
@@ -218,16 +222,26 @@ void RV5StageProcessorHF::Step()
         // Stall is already active. Decrement counter and continue stall.
         stall_cycles_--;
         stalls_needed = 1; // Indicate we are continuing the stall (1 cycle consumed)
+        if (!processor_state_.hazard.active())
+        {
+            processor_state_.hazard = previous_hazard;
+        }
+        processor_state_.hazard.stalled = true;
+        processor_state_.hazard.stallCycles = static_cast<int>(stall_cycles_) + 1;
     }
     else
     {
         // Pipeline is free. Check for a NEW hazard using the external HDU function.
-        stalls_needed = check_data_hazard(if_id_reg_, id_ex_reg_, ex_mem_reg_,
-                                          true /* is_forwarding_enabled */);
+        const DataHazardReport hazard =
+            detect_data_hazard(if_id_reg_, id_ex_reg_, ex_mem_reg_,
+                               true /* is_forwarding_enabled */);
+        stalls_needed = hazard.stalls;
         if (stalls_needed > 0)
         {
             // Start the stall: stalls_needed cycles total. 1 cycle is handled now.
             stall_cycles_ = stalls_needed - 1;
+            report_hazard(HazardKind::LoadUse, true, false, stalls_needed, hazard.producerPc,
+                          hazard.consumerPc, hazard.reg, hazard.fpr);
         }
     }
 
@@ -359,6 +373,11 @@ void RV5StageProcessorHF::pipeline_execute()
         {
             alu_result = static_cast<uint64_t>(id_ex_reg_.imm << 12);
         }
+        else if ((id_ex_reg_.instruction & 0b1111111) == 0b0010111) // auipc
+        {
+            alu_result = id_ex_reg_.pc +
+                         static_cast<uint64_t>(static_cast<int64_t>(id_ex_reg_.imm) * 4096);
+        }
 
         // Latch data for EX/MEM Register
 
@@ -375,8 +394,25 @@ void RV5StageProcessorHF::pipeline_execute()
         }
 
         ex_mem_reg_.reg2_data = store_data;
+
+        // Report the dependency that the forwarding unit just resolved. This is
+        // purely observational: the ALU inputs above are unchanged. Report A and B
+        // together only when they come from the same producer; otherwise report A
+        // so the source/register pair stays consistent.
+        const InstructionSources used = instruction_sources(instruction);
+        const bool report_a = forward_a != 0 && used.gpr_rs1;
+        const bool report_b = forward_b != 0 && used.gpr_rs2;
+        if (report_a || report_b)
+        {
+            const bool use_a = report_a;
+            const uint8_t level = use_a ? forward_a : forward_b;
+            const uint64_t source_pc = level == 2 ? ex_mem_reg_.pc : mem_wb_reg_.prev_pc;
+            report_hazard(HazardKind::Data, false, true, 0, source_pc, id_ex_reg_.pc,
+                          use_a ? id_ex_reg_.rs1 : id_ex_reg_.rs2, false);
+        }
     }
 
+    ex_mem_reg_.prev_pc = ex_mem_reg_.pc;
     ex_mem_reg_.prev_reg_write = ex_mem_reg_.reg_write;
     ex_mem_reg_.prev_rd = ex_mem_reg_.rd;
     ex_mem_reg_.prev_freg_write = ex_mem_reg_.freg_write;
