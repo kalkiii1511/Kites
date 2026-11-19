@@ -9,6 +9,7 @@
  */
 
 #include "processor/processor_factory.h"
+#include "processor/rv5s/rv5s_processor_base.h"
 #include "processor/rv5s/rv5s_processor_h_f.h"
 #include "processor/rv5s/rv5s_processor_h_nf.h"
 #include "processor/rv5s/rv5s_processor_nh_f.h"
@@ -34,6 +35,7 @@ ProcessorManager::ProcessorManager(QObject *parent, ProcessorType vmType) : QObj
     ProcessorFactory::RegisterVM<RV5StageProcessorHF>(ProcessorType::RV5Stage_H_F);
     m_currentProcessorType = vmType;
     m_currentProcessor = ProcessorFactory::createVM(vmType);
+    applyBranchPredictor();
     connect(m_currentProcessor.get(), &ProcessorBase::processorClockedSignal, this,
             &ProcessorManager::processorStateChangedSignal, Qt::DirectConnection);
     connect(m_currentProcessor.get(), &ProcessorBase::processorPausedAtBreakpointSignal, this,
@@ -54,6 +56,7 @@ void ProcessorManager::changeProcessor(ProcessorType vmType)
     m_currentProcessorType = vmType;
     m_currentProcessor = ProcessorFactory::createVM(vmType);
     m_currentProcessor->step_delay_ = m_stepDelayMs;
+    applyBranchPredictor();
     connect(m_currentProcessor.get(), &ProcessorBase::processorClockedSignal, this,
             &ProcessorManager::processorStateChangedSignal, Qt::DirectConnection);
     connect(m_currentProcessor.get(), &ProcessorBase::processorClockedSignal, this,
@@ -322,6 +325,78 @@ unsigned int ProcessorManager::getCycles() const
 unsigned int ProcessorManager::getInstructionsRetired() const
 {
     return m_currentProcessor->instructions_retired_;
+}
+
+// ---------------------------------------------------------------------------
+// Branch predictor plumbing. The predictor lives in the RV5S pipeline; the manager
+// only forwards requests and reports stats for the current processor.
+// ---------------------------------------------------------------------------
+namespace
+{
+RV5StageVM_Base *asRV5Processor(ProcessorBase *processor)
+{
+    return dynamic_cast<RV5StageVM_Base *>(processor);
+}
+} // namespace
+
+void ProcessorManager::applyBranchPredictor()
+{
+    if (auto *rv5 = asRV5Processor(m_currentProcessor.get()))
+    {
+        rv5->SetBranchPredictorType(m_branchPredictorType);
+    }
+}
+
+void ProcessorManager::setBranchPredictor(BranchPredictorType type)
+{
+    m_branchPredictorType = type;
+    applyBranchPredictor();
+}
+
+BranchPredictorType ProcessorManager::getBranchPredictorType() const
+{
+    if (auto *rv5 = asRV5Processor(m_currentProcessor.get()))
+    {
+        return rv5->GetBranchPredictorType();
+    }
+    // Single-cycle RVSS always predicts "not taken" (no fetch redirection at all).
+    return BranchPredictorType::StaticNotTaken;
+}
+
+uint64_t ProcessorManager::getBranchPredictions() const
+{
+    if (auto *rv5 = asRV5Processor(m_currentProcessor.get()))
+    {
+        return rv5->GetBranchPredictions();
+    }
+    return 0;
+}
+
+uint64_t ProcessorManager::getBTBHits() const
+{
+    if (auto *rv5 = asRV5Processor(m_currentProcessor.get()))
+    {
+        return rv5->GetBTBHits();
+    }
+    return 0;
+}
+
+double ProcessorManager::getBranchAccuracy() const
+{
+    if (auto *rv5 = asRV5Processor(m_currentProcessor.get()))
+    {
+        return rv5->GetBranchAccuracy();
+    }
+    return 100.0;
+}
+
+std::vector<BTBInspectorRow> ProcessorManager::getBranchPredictorEntries() const
+{
+    if (auto *rv5 = asRV5Processor(m_currentProcessor.get()))
+    {
+        return rv5->GetBranchPredictorEntries();
+    }
+    return {};
 }
 
 }//namespace Kites

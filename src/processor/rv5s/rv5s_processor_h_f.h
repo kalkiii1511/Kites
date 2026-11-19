@@ -36,6 +36,9 @@ class RV5StageProcessorHF : public RV5StageVM_Base
 
     void SetActiveWireNames() override;
 
+    // Forwarding makes branch operands available in EX, so this variant can back a BTB/BHT.
+    bool SupportsBranchPrediction() const override { return true; }
+
   private:
     // The Hazard Detection Unit instance
     // RV5SHazardUnit hazard_unit_;

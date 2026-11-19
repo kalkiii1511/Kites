@@ -8,6 +8,7 @@
 #include "common/assembled_program.h"
 #include "config/config.h"
 #include "processor/processor_base.h"
+#include "processor/rv5s/rv5s_branch_predictor.h"
 #include "processor_types.h"
 #include "profiler/profiler.h"
 #include "ui/processor_tab/circuit_scene.h"
@@ -70,7 +71,16 @@ public:
     unsigned int getStallCycles() const;
     unsigned int getCycles() const;
     unsigned int getInstructionsRetired() const;
+
+    // --- branch predictor (only the RV5S H_* variants support it) ---
+    void setBranchPredictor(BranchPredictorType type);
+    BranchPredictorType getBranchPredictorType() const;
+    uint64_t getBranchPredictions() const;
+    uint64_t getBTBHits() const;
+    double getBranchAccuracy() const;
+    std::vector<BTBInspectorRow> getBranchPredictorEntries() const;
 private:
+    void applyBranchPredictor();
     void updateEditorHighlight(const std::vector<uint64_t>& programCounters);
     // Maps the current program counter back to a 1-based editor source line,
     // or -1 if it isn't in the current program's mapping.
@@ -82,6 +92,8 @@ private:
     Profiler m_profiler{};
     // we need this as when we chage vm we need preserve the step delay
     unsigned int m_stepDelayMs{1000};
+    // Predictor choice survives processor changes; applied whenever a VM is created.
+    BranchPredictorType m_branchPredictorType{BranchPredictorType::StaticNotTaken};
 public slots:
     void runSlot();
     // same as runSlot but the processor starts paused so the user can step from the first instruction

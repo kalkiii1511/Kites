@@ -273,12 +273,19 @@ body {
     gap: 6px
 }
 
+.examples-menu-wrap {
+    position: relative;
+    display: flex
+}
+
+/* Overlay the editor instead of taking a row of its own. */
 .examples-menu-row {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 60;
     display: flex;
-    justify-content: flex-end;
-    padding: 5px 11px;
-    border-bottom: 1px solid #edf0f3;
-    flex-shrink: 0
+    justify-content: flex-end
 }
 
 .examples-menu {
@@ -289,7 +296,7 @@ body {
     border: 1px solid #dfe5ec;
     border-radius: 6px;
     background: #fff;
-    box-shadow: 0 4px 14px rgba(15, 23, 42, .08)
+    box-shadow: 0 12px 28px rgba(15, 23, 42, .18)
 }
 
 .example-option {
@@ -358,7 +365,7 @@ body {
     background: #fafbfc;
     border-right: 1px solid #eef0f3;
     text-align: right;
-    padding: 9px 9px 0 0;
+    padding: 9px 9px 9px 0;
     color: #94a3b8;
     font: 12px/21px 'DM Mono', monospace
 }
@@ -1327,4 +1334,205 @@ footer {
 @keyframes toastIn {
     from { opacity: 0; transform: translateY(8px) }
     to { opacity: 1; transform: none }
+}
+
+/* ---------------------------------------------------------------------------
+   Branch predictor
+   --------------------------------------------------------------------------- */
+.predictor-select {
+    max-width: 132px
+}
+
+.predictor-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #fff
+}
+
+.predictor-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-bottom: 1px solid #edf0f3;
+    background: #f8fafc;
+    font-size: 10px;
+    color: #334155
+}
+
+.predictor-card-head span {
+    font-size: 9px;
+    color: #94a3b8
+}
+
+.predictor-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 8px 10px;
+    font-size: 9.5px;
+    color: #64748b
+}
+
+.predictor-metrics b {
+    font: 9.5px 'DM Mono', monospace;
+    color: #334155;
+    margin-left: 4px
+}
+
+.predictor-table-wrap {
+    overflow: auto;
+    max-height: 220px;
+    border-top: 1px solid #f1f5f9
+}
+
+.predictor-table {
+    width: 100%;
+    border-collapse: collapse;
+    font: 9.5px 'DM Mono', monospace
+}
+
+.predictor-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 5px 10px;
+    border-bottom: 1px solid #edf0f3;
+    background: #f8fafc;
+    color: #64748b;
+    font: 8.5px Inter, system-ui, sans-serif;
+    letter-spacing: .04em;
+    text-align: left
+}
+
+.predictor-table td {
+    padding: 5px 10px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #334155;
+    white-space: nowrap
+}
+
+.predictor-table td:first-child {
+    width: 44px;
+    color: #94a3b8
+}
+
+.predictor-table tbody tr:hover {
+    background: #f8fafc
+}
+
+.predictor-counter {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 2px 8px;
+    background: #eef2f7;
+    color: #475569;
+    font-size: 8.5px
+}
+
+.counter-2,
+.counter-3 {
+    background: #dcfce7;
+    color: #15803d
+}
+
+.counter-0,
+.counter-1 {
+    background: #fee2e2;
+    color: #b91c1c
+}
+
+.predictor-empty {
+    padding: 12px 10px;
+    color: #94a3b8;
+    font-size: 9.5px;
+    line-height: 1.5
+}
+
+.predictor-empty b {
+    color: #475569
+}
+
+/* ---------------------------------------------------------------------------
+   Hazard visibility toggle
+   --------------------------------------------------------------------------- */
+.datapath-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px
+}
+
+.hazard-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    background: #fff;
+    color: #475569;
+    font-size: 9.5px;
+    white-space: nowrap;
+    cursor: pointer
+}
+
+.hazard-toggle:hover {
+    background: #f8fafc;
+    border-color: #cbd5e1
+}
+
+.hazard-toggle.off {
+    background: #f8fafc;
+    color: #94a3b8
+}
+
+.hazard-toggle.compact {
+    padding: 3px 8px;
+    font-size: 9px
+}
+
+.hazard-toggle svg {
+    flex-shrink: 0
+}
+
+.hazard-hidden-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    border: 1px dashed #e2e8f0;
+    border-radius: 6px;
+    background: #fbfcfd;
+    color: #94a3b8;
+    font-size: 9.5px
+}
+
+.hazard-hidden-note button {
+    margin-left: auto;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #2563eb;
+    font-size: 9.5px;
+    cursor: pointer
+}
+
+.hazard-hidden-note button:hover {
+    text-decoration: underline
+}
+
+.predictor-label {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font: 9px 'DM Mono', monospace
+}
+
+.flow-message.error {
+    color: #b91c1c;
+    font-weight: 600
 }

@@ -15,8 +15,18 @@ import quicksort from './examples/quicksort.s?raw';
 import rv64imfdPipelineSmokeTest from './examples/rv64imfd_pipeline_smoke_test.s?raw';
 import rv64imfdSmokeTest from './examples/rv64imfd_smoke_test.s?raw';
 import stringOperations from './examples/string_operations.s?raw';
+import branchPrediction from './examples/branch_prediction.s?raw';
 
-export const examples = [
+export type Example = {
+  title: string;
+  description: string;
+  source: string;
+  /** Optional VM/predictor to select when the example is loaded. */
+  vm?: string;
+  predictor?: '2bit' | 'static-nt';
+};
+
+export const examples: Example[] = [
   {
     title: '3×3 Matrix Multiplication',
     description: 'Multiplies two 3×3 integer matrices and prints the result.',
@@ -98,8 +108,15 @@ export const examples = [
     source: rv64imfdSmokeTest,
   },
   {
+    title: 'Branch Prediction · 2-bit BTB',
+    description: 'Three branches in a loop populate the BTB. RV5 H/F with the 2-bit predictor is selected automatically.',
+    source: branchPrediction,
+    vm: 'rv5-h-f',
+    predictor: '2bit',
+  },
+  {
     title: 'String Operations',
     description: 'Demonstrates string length, copying, and reversing.',
     source: stringOperations,
   },
-] as const;
+];

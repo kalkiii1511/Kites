@@ -18,17 +18,30 @@ struct IF_ID_Register
     uint32_t instruction {NOP};  // A NOP instruction (addi x0, x0, 0)
     uint64_t pc {INVALID_PC};
 
+    // --- Branch prediction metadata attached to the fetched instruction ---
+    bool     predicted_taken  {false};  // Direction chosen by the predictor for this fetch
+    uint64_t predicted_target {0};      // PC the fetch unit picked (target or pc + 4)
+    bool     btb_hit          {false};  // Whether a BTB entry matched this PC
+
     void reset()
     {
         // Resetting injects a NOP, used for flushing the pipeline.
         instruction = NOP;
         pc          = INVALID_PC;
+        resetPrediction();
     }
 
     void insertNop()
     {
         // Inserts a NOP instruction into the pipeline stage.
         instruction = NOP;
+    }
+
+    void resetPrediction()
+    {
+        predicted_taken  = false;
+        predicted_target = 0;
+        btb_hit          = false;
     }
 };
 
@@ -70,6 +83,11 @@ struct ID_EX_Register
 
     uint8_t alu_op {0};      // Hint for the ALU Control Unit
 
+    // --- Branch prediction metadata carried from IF ---
+    bool     predicted_taken  {false};  // Direction the predictor guessed in IF
+    uint64_t predicted_target {0};      // PC the fetch unit followed in IF
+    bool     btb_hit          {false};  // Whether the BTB matched that PC
+
     void reset()
     {
           // Resetting injects a "bubble"
@@ -80,6 +98,9 @@ struct ID_EX_Register
         instruction = NOP;
         reg_write   = freg_write = mem_to_reg = mem_read = mem_write = branch = alu_src = false;
         alu_op      = 0;
+        predicted_taken  = false;
+        predicted_target = 0;
+        btb_hit          = false;
     }
 };
 

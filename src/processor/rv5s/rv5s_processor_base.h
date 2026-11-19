@@ -2,6 +2,7 @@
 #include "processor/pipeline_registers.h"
 #include "processor/processor_base.h"
 #include "processor/processor_manager.h"
+#include "rv5s_branch_predictor.h"
 #include "rv5s_control_unit.h"
 
 namespace Kites
@@ -24,6 +25,7 @@ struct PipelineRegisterChange
 struct RV5StageStepDelta : public StepDelta
 {
     PipelineRegisterChange pipeline_register_change;
+    BranchPredictorDelta branch_predictor_change;
 };
 
 class RV5StageVM_Base : public ProcessorBase
@@ -42,6 +44,41 @@ class RV5StageVM_Base : public ProcessorBase
     void Reset() override;
     void Undo() override;
     void Redo() override;
+
+    // --- branch predictor functions ---
+
+    // Branch prediction requires the branch condition to be resolved in EX with correct
+    // operands (forwarding, or full hazard stalls). Only those variants opt in.
+    virtual bool SupportsBranchPrediction() const { return false; }
+
+    void SetBranchPredictorType(BranchPredictorType type)
+    {
+        branch_predictor_.SetType(SupportsBranchPrediction()
+                                      ? type
+                                      : BranchPredictorType::StaticNotTaken);
+    }
+
+    BranchPredictorType GetBranchPredictorType() const
+    {
+        return SupportsBranchPrediction() ? branch_predictor_.GetType()
+                                          : BranchPredictorType::StaticNotTaken;
+    }
+
+    bool UsesBranchPrediction() const
+    {
+        return SupportsBranchPrediction() &&
+               branch_predictor_.GetType() == BranchPredictorType::TwoBitBHT;
+    }
+
+    const RV5SBranchPredictor &GetBranchPredictor() const { return branch_predictor_; }
+
+    uint64_t GetBranchPredictions() const { return branch_predictor_.GetTotalPredictions(); }
+    uint64_t GetBTBHits() const { return branch_predictor_.GetBTBHits(); }
+    double GetBranchAccuracy() const { return branch_predictor_.GetAccuracy(); }
+    std::vector<BTBInspectorRow> GetBranchPredictorEntries() const
+    {
+        return branch_predictor_.GetActiveEntries();
+    }
 
   protected:
     // Pipeline Registers
@@ -108,5 +145,9 @@ class RV5StageVM_Base : public ProcessorBase
 
     // --- Specialized handler functions (called from pipeline stages) ---
     virtual void handle_syscall() = 0;
+
+    // -- branch predictor --
+    // Baseline is static not-taken; the H_* variants opt in to the 2-bit BTB/BHT.
+    RV5SBranchPredictor branch_predictor_{BranchPredictorType::StaticNotTaken};
 };
 }//namespace Kites

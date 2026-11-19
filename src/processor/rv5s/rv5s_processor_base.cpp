@@ -105,12 +105,14 @@ void RV5StageVM_Base::Reset()
     instructions_retired_ = 0;
     cycle_s_              = 0;
     stall_cycles_         = 0;
+    branch_mispredictions_ = 0;
     pc_redirected_        = false;
     last_breakpoint_pc_.reset(); // Clear breakpoint tracking on reset
 
     registers_.Reset();
     memory_controller_.reset();
     control_unit_.Reset();
+    branch_predictor_.Reset();
 
     if_id_reg_.reset();
     id_ex_reg_.reset();
@@ -211,6 +213,11 @@ void RV5StageVM_Base::pipeline_decode()
         id_ex_reg_.mem_write  = false;
         id_ex_reg_.mem_to_reg = false;
         id_ex_reg_.alu_op     = 0;
+
+        // Ensure bubble instructions do not carry stale prediction metadata into EX
+        id_ex_reg_.predicted_taken  = false;
+        id_ex_reg_.predicted_target = 0;
+        id_ex_reg_.btb_hit          = false;
         return;
     }
     // Control Unit: Generate signals based on the instruction
@@ -220,6 +227,11 @@ void RV5StageVM_Base::pipeline_decode()
     id_ex_reg_.pc = if_id_reg_.pc;
     id_ex_reg_.instruction = instruction;
     id_ex_reg_.imm = ImmGenerator(instruction);
+
+    // Forward IF-stage branch prediction metadata alongside the instruction into ID/EX
+    id_ex_reg_.predicted_taken  = if_id_reg_.predicted_taken;
+    id_ex_reg_.predicted_target = if_id_reg_.predicted_target;
+    id_ex_reg_.btb_hit          = if_id_reg_.btb_hit;
 
     // Extract register numbers
     id_ex_reg_.rs1 = (instruction >> 15) & 0x1F;
@@ -434,7 +446,17 @@ void RV5StageVM_Base::fetch_and_advance_pc(bool stalled)
     // A stall skipped the fetch, so hold the PC on the instruction still to be fetched.
     if (!stalled)
     {
-        program_counter_ += 4;
+        // With prediction enabled the PC follows the direction guessed for this fetch;
+        // EX redirects it later only if that guess was wrong.
+        if (UsesBranchPrediction() && if_id_reg_.pc != INVALID_PC &&
+            if_id_reg_.predicted_taken)
+        {
+            program_counter_ = if_id_reg_.predicted_target;
+        }
+        else
+        {
+            program_counter_ += 4;
+        }
     }
 }
 
@@ -442,7 +464,10 @@ void RV5StageVM_Base::pipeline_memory()
 {
 
     // --- B-Type Conditional Branch Resolution (3-Cycle Penalty) ---
-    if (ex_mem_reg_.branch_taken && (ex_mem_reg_.instruction & 0b1111111) == 0b1100011)
+    // Only the static not-taken baseline resolves conditional branches here. With the
+    // 2-bit predictor the branch is already resolved in EX, which redirects on a miss.
+    if (!UsesBranchPrediction() && ex_mem_reg_.branch_taken &&
+        (ex_mem_reg_.instruction & 0b1111111) == 0b1100011)
     {
         // B-Type misprediction confirmed in MEM stage. Hardware flushes the pipeline.
 
@@ -911,6 +936,7 @@ void RV5StageVM_Base::Undo()
     id_ex_reg_ = last.pipeline_register_change.old_id_ex_reg;
     ex_mem_reg_ = last.pipeline_register_change.old_ex_mem_reg;
     mem_wb_reg_ = last.pipeline_register_change.old_mem_wb_reg;
+    branch_predictor_.Rollback(last.branch_predictor_change);
 
     redo_stack_.push(last);
 
@@ -971,6 +997,7 @@ void RV5StageVM_Base::Redo()
     id_ex_reg_ = next.pipeline_register_change.new_id_ex_reg;
     ex_mem_reg_ = next.pipeline_register_change.new_ex_mem_reg;
     mem_wb_reg_ = next.pipeline_register_change.new_mem_wb_reg;
+    branch_predictor_.Reapply(next.branch_predictor_change);
 
     undo_stack_.push(next);
 

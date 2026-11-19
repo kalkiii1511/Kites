@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, UIEvent } from 'react';
 import {
-  AlertTriangle, ChevronDown, Code2, Cpu, Database, Download, MemoryStick, Play,
+  AlertTriangle, ChevronDown, Code2, Cpu, Database, Download, Eye, EyeOff, MemoryStick, Play,
   RotateCcw, Search, SkipForward, Square, Upload, Wifi, WifiOff, X,
 } from 'lucide-react';
 import { examples } from './examples';
+import type { Example } from './examples';
 
 type Tab = 'Editor' | 'Datapath' | 'Memory' | 'Cache';
 type StageName = 'IF' | 'ID' | 'EX' | 'MEM' | 'WB';
@@ -21,6 +22,14 @@ type HazardState = {
   register: number;
   fpr: boolean;
 };
+type BtbEntry = {
+  index: number;
+  pc: string;
+  target: string;
+  counter: number;
+  stateLabel: string;
+  unconditional: boolean;
+};
 type Reg = { name: string; abi: string; value: bigint };
 type InstructionRow = { address: string; encoding: string; instruction: string; sourceLine: number };
 type MachineState = {
@@ -32,6 +41,11 @@ type MachineState = {
   instructionsRetired: number;
   stallCycles: number;
   branchMispredictions: number;
+  branchPredictor: '2bit' | 'static-nt';
+  branchPredictions: number;
+  btbHits: number;
+  branchAccuracy: number;
+  btbEntries: BtbEntry[];
   cpi: number;
   ipc: number;
   programLoaded: boolean;
@@ -86,7 +100,9 @@ const zeroHazard = (): HazardState => ({
 });
 const zeroState = (): MachineState => ({
   pc: '0x0000000000000000', gpr: {}, fpr: {}, csr: {}, cycles: 0,
-  instructionsRetired: 0, stallCycles: 0, branchMispredictions: 0, cpi: 0, ipc: 0,
+  instructionsRetired: 0, stallCycles: 0, branchMispredictions: 0,
+  branchPredictor: 'static-nt', branchPredictions: 0, btbHits: 0, branchAccuracy: 100, btbEntries: [],
+  cpi: 0, ipc: 0,
   programLoaded: false, programComplete: false, processor: '', pipeline: false,
   stages: [], hazard: zeroHazard(),
 });
@@ -95,6 +111,7 @@ const normalizeState = (state: MachineState): MachineState => ({
   ...state,
   stages: state.stages ?? [],
   hazard: state.hazard ?? zeroHazard(),
+  btbEntries: state.btbEntries ?? [],
 });
 const hex = (n: bigint) => '0x' + n.toString(16).padStart(16, '0');
 const shortPc = (pc: string) => {
@@ -118,6 +135,16 @@ const addressKey = (address: string) => {
 const registerLabel = (hazard: HazardState) => hazard.fpr
   ? (fAbi[hazard.register] ?? `f${hazard.register}`)
   : (gAbi[hazard.register] ?? `x${hazard.register}`);
+// Disassembly carries the branch target's label in angle brackets, e.g.
+// "bne x5, x0, -28 <loop>". Split it out so the BTB can show both.
+const splitBranchLabel = (row?: InstructionRow) => {
+  if (!row)
+    return { instruction: '', label: '' };
+  const match = /^(.*?)\s*<([^>]+)>\s*$/.exec(row.instruction);
+  return match
+    ? { instruction: match[1].trim(), label: match[2] }
+    : { instruction: row.instruction, label: '' };
+};
 const parseAddress = (s: string) => {
   const v = s.trim();
   if (!v)
@@ -227,14 +254,40 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [vm, setVm] = useState('rvss');
+  const [predictor, setPredictor] = useState<'2bit' | 'static-nt'>('2bit');
+  // Branch prediction needs a variant that resolves branch conditions in EX.
+  const predictorSupported = vm === 'rv5-h-f' || vm === 'rv5-h-nf';
   const [instructions, setInstructions] = useState<InstructionRow[]>([]);
   const [currentSourceLine, setCurrentSourceLine] = useState(0);
   const [currentAddress, setCurrentAddress] = useState('');
   const [speed, setSpeed] = useState(5);
   const [running, setRunning] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
+  const examplesWrapRef = useRef<HTMLDivElement>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [hazardLog, setHazardLog] = useState<HazardLogEntry[]>([]);
+  // Hazard callouts, log, popups and stage rings can be hidden on demand; the choice
+  // is remembered so a reload keeps the user's preference.
+  const [showHazards, setShowHazards] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem('kites.showHazards') !== 'false';
+    }
+    catch {
+      return true;
+    }
+  });
+  const toggleHazards = () => {
+    const next = !showHazards;
+    setShowHazards(next);
+    try {
+      window.localStorage.setItem('kites.showHazards', String(next));
+    }
+    catch {
+      // Storage can be unavailable (private mode); the toggle still works for this session.
+    }
+    if (!next)
+      setToast(null);
+  };
   const runActive = useRef(false);
   const speedRef = useRef(5);
   const lastHazardKey = useRef('');
@@ -253,12 +306,20 @@ function App() {
     try {
       await api('/api/health');
       setConnected(true);
-      setMessage('Connected to Kites');
+      // Only claim the connection state while the footer has nothing more important
+      // to show; otherwise an assembly/run error would vanish after three seconds.
+      setMessage(previous =>
+        previous === 'Connecting to Kites…' || previous === 'Connected to Kites'
+          ? 'Connected to Kites'
+          : previous);
       await refreshState();
     }
     catch (e) {
       setConnected(false);
-      setMessage((e as Error).message);
+      setMessage(previous =>
+        previous === 'Connecting to Kites…' || previous === 'Connected to Kites'
+          ? (e as Error).message
+          : previous);
     }
   }, [refreshState]);
   useEffect(() => {
@@ -407,9 +468,10 @@ function App() {
       return;
     lastHazardKey.current = key;
     const id = `${key}|${machine.cycles}`;
-    setToast({ id, ...hazardView });
+    if (showHazards)
+      setToast({ id, ...hazardView });
     setHazardLog(log => [{ id, cycle: machine.cycles, ...hazardView }, ...log].slice(0, 8));
-  }, [hazardView, machine.cycles, machine.hazard]);
+  }, [hazardView, machine.cycles, machine.hazard, showHazards]);
 
   useEffect(() => {
     if (!toast)
@@ -443,7 +505,7 @@ function App() {
     try {
       const s = await api<AssembleResponse>('/api/program/assemble', {
         method: 'POST',
-        body: JSON.stringify({ source: code, vm }),
+        body: JSON.stringify({ source: code, vm, branchPredictor: predictor }),
       });
       setMachine(normalizeState(s));
       setInstructions(s.instructions);
@@ -493,7 +555,7 @@ function App() {
     try {
       const assembled = await api<AssembleResponse>('/api/program/assemble', {
         method: 'POST',
-        body: JSON.stringify({ source: code, vm }),
+        body: JSON.stringify({ source: code, vm, branchPredictor: predictor }),
       });
       setMachine(normalizeState(assembled));
       setInstructions(assembled.instructions);
@@ -632,8 +694,29 @@ function App() {
     reader.onload = () => setCode(String(reader.result ?? ''));
     reader.readAsText(file);
   };
-  const loadExample = (source: string) => {
-    setCode(source);
+  useEffect(() => {
+    if (!examplesOpen)
+      return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!examplesWrapRef.current?.contains(event.target as Node))
+        setExamplesOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape')
+        setExamplesOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [examplesOpen]);
+
+  const loadExample = (example: Example) => {
+    setCode(example.source);
+    if (example.vm) setVm(example.vm);
+    if (example.predictor) setPredictor(example.predictor);
     setExamplesOpen(false);
     editorRef.current?.focus();
   };
@@ -673,6 +756,16 @@ function App() {
         <select className="vm-select" disabled={busy || running} value={vm} onChange={e => setVm(e.target.value)} title={mode.note}>
           {processorModes.map(item => <option value={item.id} key={item.id}>{item.label}</option>)}
         </select>
+        <select
+          className="vm-select predictor-select"
+          disabled={busy || running || !predictorSupported}
+          value={predictorSupported ? predictor : 'static-nt'}
+          onChange={e => setPredictor(e.target.value as '2bit' | 'static-nt')}
+          title={predictorSupported ? 'Branch predictor used by the RV5 H_* variants' : 'Branch prediction needs an RV5 H/NF or H/F variant (branch resolved in EX)'}
+        >
+          <option value="2bit">2-bit predictor</option>
+          <option value="static-nt">Static not taken</option>
+        </select>
       </div>
     </header>
     <main className="workspace">
@@ -683,18 +776,18 @@ function App() {
             <div className="actions">
               <label className="small-btn">Import<input type="file" accept=".s,.asm,.txt" hidden onChange={e => importCode(e.target.files?.[0])} /></label>
               <button className="small-btn" onClick={exportCode}><Download size={12} /> Export</button>
-              <div className="examples-menu-wrap">
+              <div className="examples-menu-wrap" ref={examplesWrapRef}>
                 <button className="small-btn" aria-haspopup="menu" aria-expanded={examplesOpen} onClick={() => setExamplesOpen(open => !open)}>Examples <ChevronDown size={12} /></button>
+                {examplesOpen && <div className="examples-menu-row"><div className="examples-menu" role="menu" aria-label="Assembly examples">
+                  {examples.map(example => <button className="example-option" key={example.title} role="menuitem" onClick={() => loadExample(example)}>
+                    <b>{example.title}</b>
+                    <span>{example.description}</span>
+                  </button>)}
+                </div></div>}
               </div>
               <button className="primary" disabled={busy || running || !connected} onClick={() => void assemble()}>Assemble</button>
             </div>
           </div>
-          {examplesOpen && <div className="examples-menu-row"><div className="examples-menu" role="menu" aria-label="Assembly examples">
-            {examples.map(example => <button className="example-option" key={example.title} role="menuitem" onClick={() => loadExample(example.source)}>
-              <b>{example.title}</b>
-              <span>{example.description}</span>
-            </button>)}
-          </div></div>}
           <div className="editor-wrap">
             <div className="line-nos" ref={lineGutterRef}>
               {code.split('\n').map((_, i) => {
@@ -713,6 +806,11 @@ function App() {
               spellCheck={false}
               value={code}
               onChange={e => setCode(e.target.value)}
+              onScroll={e => {
+                // Keep the line-number gutter locked to the code's vertical scroll.
+                if (lineGutterRef.current)
+                  lineGutterRef.current.scrollTop = e.currentTarget.scrollTop;
+              }}
               aria-label="Assembly editor"
               style={highlightStyle}
             />
@@ -720,7 +818,16 @@ function App() {
           <div className="result">
             <div className="result-head">
               <b>Execution flow</b>
-              <span>{message}</span>
+              <span className={/error|failed|cannot|unable/i.test(message) ? 'flow-message error' : 'flow-message'}>{message}</span>
+              <button
+                className={`hazard-toggle compact ${showHazards ? 'on' : 'off'}`}
+                onClick={toggleHazards}
+                title={showHazards ? 'Hide hazard details' : 'Show hazard details'}
+                aria-pressed={showHazards}
+              >
+                {showHazards ? <EyeOff size={12} /> : <Eye size={12} />}
+                Hazards {showHazards ? 'on' : 'off'}
+              </button>
               <label className="speed-control">Speed <input type="range" min="1" max="20" value={speed} onChange={e => { const value = Number(e.target.value); setSpeed(value); speedRef.current = value; }} /><b>{speed} steps/s</b></label>
             </div>
             <div className={`pipeline-strip ${machine.pipeline ? 'five-stage' : 'single-stage'}`}>
@@ -734,11 +841,11 @@ function App() {
                   pc={state?.pc ?? ''}
                   instruction={row?.instruction}
                   sourceLine={row?.sourceLine}
-                  hazard={hazardStages.has(stage)}
+                  hazard={showHazards && hazardStages.has(stage)}
                 />;
               })}
             </div>
-            {renderHazard()}
+            {showHazards && renderHazard()}
             <div className="stats-strip">
               <span>PC <b>{machine.pc}</b></span>
               <span>Cycles <b>{machine.cycles}</b></span>
@@ -747,7 +854,10 @@ function App() {
               <span>IPC <b>{Number(machine.ipc).toFixed(2)}</b></span>
               <span>Stalls <b>{machine.stallCycles}</b></span>
               <span>Branch misses <b>{machine.branchMispredictions}</b></span>
-              <span className={machine.hazard.active ? 'hazard-stat active' : 'hazard-stat'}>Hazard <b>{hazardSummary}</b></span>
+              <span>Predictions <b>{machine.branchPredictions}</b></span>
+              <span>BTB hits <b>{machine.btbHits}</b></span>
+              <span>Pred accuracy <b>{Number(machine.branchAccuracy).toFixed(1)}%</b></span>
+              {showHazards && <span className={machine.hazard.active ? 'hazard-stat active' : 'hazard-stat'}>Hazard <b>{hazardSummary}</b></span>}
             </div>
             <div className="mode-note"><b>{mode.short}</b><span>{mode.note}</span></div>
             <div className="instruction-scroll">
@@ -780,7 +890,18 @@ function App() {
               <div className="panel-title">Live processor datapath</div>
               <span className="datapath-sub">{machine.processor || mode.label}</span>
             </div>
-            <span className={`pipeline-state ${machine.pipeline ? 'pipeline' : 'single'}`}>{machine.pipeline ? '5-stage pipeline' : 'single-cycle'}</span>
+            <div className="datapath-head-actions">
+              <button
+                className={`hazard-toggle ${showHazards ? 'on' : 'off'}`}
+                onClick={toggleHazards}
+                title={showHazards ? 'Hide hazard details' : 'Show hazard details'}
+                aria-pressed={showHazards}
+              >
+                {showHazards ? <EyeOff size={12} /> : <Eye size={12} />}
+                {showHazards ? 'Hide hazards' : 'Show hazards'}
+              </button>
+              <span className={`pipeline-state ${machine.pipeline ? 'pipeline' : 'single'}`}>{machine.pipeline ? '5-stage pipeline' : 'single-cycle'}</span>
+            </div>
           </div>
           <div className="datapath-body">
             <div className={`datapath-flow ${machine.pipeline ? 'five' : 'one'}`}>
@@ -794,16 +915,18 @@ function App() {
                   pc={state?.pc ?? ''}
                   instruction={row?.instruction}
                   sourceLine={row?.sourceLine}
-                  hazard={hazardStages.has(stage)}
+                  hazard={showHazards && hazardStages.has(stage)}
                 />;
               })}
             </div>
-            {hazardView ? renderHazard() : <div className="datapath-idle"><span className="idle-dot" />No hazard in the current cycle.</div>}
+            {showHazards
+              ? hazardView ? renderHazard() : <div className="datapath-idle"><span className="idle-dot" />No hazard in the current cycle.</div>
+              : <div className="hazard-hidden-note"><EyeOff size={13} /><span>Hazard callouts and activity are hidden.</span><button onClick={toggleHazards}>Show hazards</button></div>}
             <div className="mode-card">
               <div className="mode-card-title">{mode.label}</div>
               <p>{mode.note}</p>
             </div>
-            <div className="hazard-log">
+            {showHazards && <div className="hazard-log">
               <div className="hazard-log-head"><b>Hazard activity</b><span>{hazardLog.length} recent event{hazardLog.length === 1 ? '' : 's'}</span></div>
               {hazardLog.length === 0
                 ? <div className="hazard-log-empty">Stalls, forwarded values, and branch flushes will appear here as they happen.</div>
@@ -812,6 +935,41 @@ function App() {
                     <b>{entry.title}</b>
                     <span>{entry.detail}</span>
                   </div>)}
+            </div>}
+            <div className="predictor-card">
+              <div className="predictor-card-head">
+                <b>Branch prediction</b>
+                <span>{machine.branchPredictor === '2bit' ? '2-bit saturating counters · 64-entry BTB' : 'static not taken'}</span>
+              </div>
+              {machine.branchPredictor === '2bit' ? <>
+                <div className="predictor-metrics">
+                  <span>Predictions <b>{machine.branchPredictions}</b></span>
+                  <span>BTB hits <b>{machine.btbHits}</b></span>
+                  <span>Mispredicts <b>{machine.branchMispredictions}</b></span>
+                  <span>Accuracy <b>{Number(machine.branchAccuracy).toFixed(1)}%</b></span>
+                </div>
+                {machine.btbEntries.length
+                  ? <div className="predictor-table-wrap"><table className="predictor-table">
+                      <thead><tr><th>INDEX</th><th>BRANCH PC</th><th>INSTRUCTION</th><th>LABEL</th><th>TARGET</th><th>COUNTER</th><th>TYPE</th></tr></thead>
+                      <tbody>{machine.btbEntries.map(entry => {
+                        const branch = splitBranchLabel(rowByAddress.get(addressKey(entry.pc)));
+                        return <tr key={entry.index}>
+                          <td>{entry.index}</td>
+                          <td>{shortPc(entry.pc)}</td>
+                          <td title={branch.instruction ? `Branch at ${shortPc(entry.pc)}` : 'Instruction not in the current program'}>
+                            {branch.instruction || '—'}
+                          </td>
+                          <td>{branch.label
+                            ? <span className="predictor-label" title={`Branch target label: ${branch.label}`}>{branch.label}</span>
+                            : '—'}</td>
+                          <td>{shortPc(entry.target)}</td>
+                          <td><span className={`predictor-counter counter-${entry.counter}`}>{entry.stateLabel}</span></td>
+                          <td>{entry.unconditional ? 'jump' : 'conditional'}</td>
+                        </tr>;
+                      })}</tbody>
+                    </table></div>
+                  : <div className="predictor-empty">No branches executed yet. Load the <b>Branch Prediction · 2-bit BTB</b> example, assemble with an H/* VM, then run it.</div>}
+              </> : <div className="predictor-empty">This VM uses static not-taken prediction and keeps no BTB/BHT. Pick RV5 H/NF or H/F to use the 2-bit predictor.</div>}
             </div>
             <div className="stage-legend">
               {stageOrder.map(stage => <span key={stage} style={{ color: stageColors[stage] }}><i style={{ background: stageColors[stage] }} />{stage}</span>)}
@@ -862,7 +1020,7 @@ function App() {
       <span className={connected ? 'status-dot' : 'status-dot offline'} />{message}
       <span className="footer-right">{connected ? <><Wifi size={12} /> Kites API connected</> : <><WifiOff size={12} /> API disconnected</>} · RV64IMAFD</span>
     </footer>
-    {toast && <div className={`hazard-toast ${toast.tone}`} role="status">
+    {showHazards && toast && <div className={`hazard-toast ${toast.tone}`} role="status">
       <div className="toast-icon"><AlertTriangle size={17} /></div>
       <div className="toast-copy"><b>{toast.title}</b><span>{toast.detail}</span></div>
       <button className="toast-close" aria-label="Dismiss hazard alert" onClick={() => setToast(null)}><X size={14} /></button>

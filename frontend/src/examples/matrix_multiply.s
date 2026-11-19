@@ -18,11 +18,10 @@ matrix_c:  .word 0, 0, 0
            .word 0, 0, 0
 
 matrix_size: .word 3             # Dimension of the matrices
-space:       .asciz " "         # Space between printed elements
-newline:     .asciz "\n"       # Newline at end of each row
+space:       .string " "        # Space between printed elements
+newline:     .string "\n"      # Newline at end of each row
 
 .text
-.globl main
 main:
     # Load base addresses of matrices and size
     la   s0, matrix_a      # s0 = address of A

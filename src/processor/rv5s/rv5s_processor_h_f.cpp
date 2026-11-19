@@ -283,6 +283,11 @@ void RV5StageProcessorHF::pipeline_fetch()
     {
         if_id_reg_.instruction = memory_controller_.readInstruction(program_counter_);
         if_id_reg_.pc = program_counter_;
+
+        const BranchPrediction pred = branch_predictor_.Predict(program_counter_);
+        if_id_reg_.predicted_taken = pred.predicted_taken;
+        if_id_reg_.predicted_target = pred.predicted_target;
+        if_id_reg_.btb_hit = pred.btb_hit;
     }
     else
     {
@@ -437,11 +442,12 @@ void RV5StageProcessorHF::pipeline_execute()
     ex_mem_reg_.branch_target_pc = 0;
 
     uint8_t opcode = instruction & 0b1111111;
+    const bool use_two_bit_bp = UsesBranchPrediction();
 
     // --- Control Hazard Logic (Automated) ---
 
     // Conditional Branch Check (B-type)
-    if (id_ex_reg_.branch && opcode == 0b1100011)
+    if (id_ex_reg_.pc != INVALID_PC && id_ex_reg_.branch && opcode == 0b1100011)
     {
         bool condition_met = false;
         uint8_t funct3 = (instruction >> 12) & 0x7;
@@ -468,14 +474,29 @@ void RV5StageProcessorHF::pipeline_execute()
             break; // BGEU
         }
 
-        if (condition_met)
+        const uint64_t actual_target = id_ex_reg_.pc + id_ex_reg_.imm;
+        const uint64_t expected_next_pc = condition_met ? actual_target : (id_ex_reg_.pc + 4);
+        const bool mispredicted = (id_ex_reg_.predicted_taken != condition_met) ||
+                                  (condition_met && id_ex_reg_.predicted_target != actual_target);
+
+        branch_predictor_.Update(id_ex_reg_.pc, condition_met, actual_target,
+                                 /*is_unconditional=*/false, id_ex_reg_.btb_hit, mispredicted,
+                                 &current_delta_.branch_predictor_change);
+
+        ex_mem_reg_.branch_taken = condition_met;
+        ex_mem_reg_.branch_target_pc = actual_target;
+
+        if (use_two_bit_bp && mispredicted)
         {
-            ex_mem_reg_.branch_taken = true;
-            ex_mem_reg_.branch_target_pc = id_ex_reg_.pc + id_ex_reg_.imm;
+            redirect_pc(expected_next_pc);
+            if_id_reg_.reset();
+            branch_mispredictions_++;
+            // Prediction resolved in EX: only the wrongly fetched instruction is discarded.
+            report_hazard(HazardKind::Control, false, false, 1, id_ex_reg_.pc, INVALID_PC);
         }
     }
-    // Unconditional Jump Check (JAL/JALR: 1-cycle penalty)
-    else if (opcode == 0b1101111 || opcode == 0b1100111)
+    // Unconditional Jump Check (JAL / JALR)
+    else if (id_ex_reg_.pc != INVALID_PC && (opcode == 0b1101111 || opcode == 0b1100111))
     {
         uint64_t jump_target;
         if (opcode == 0b1101111)
@@ -484,13 +505,30 @@ void RV5StageProcessorHF::pipeline_execute()
         }
         else
         {
-            jump_target = alu_result & ~1;              // JALR (ALU result is Reg + Imm)
-            ex_mem_reg_.alu_result = id_ex_reg_.pc + 4; // Set link address (PC+4)
+            jump_target = alu_result & ~1ULL;           // JALR (ALU result is Reg + Imm)
+            ex_mem_reg_.alu_result = id_ex_reg_.pc + 4; // Link address (PC + 4)
         }
 
-        redirect_pc(jump_target);
-        if_id_reg_.reset();
+        const bool mispredicted =
+            (!id_ex_reg_.predicted_taken) || (id_ex_reg_.predicted_target != jump_target);
+
+        branch_predictor_.Update(id_ex_reg_.pc, /*actual_taken=*/true, jump_target,
+                                 /*is_unconditional=*/true, id_ex_reg_.btb_hit, mispredicted,
+                                 &current_delta_.branch_predictor_change);
+
         ex_mem_reg_.branch_taken = true;
+        ex_mem_reg_.branch_target_pc = jump_target;
+
+        if (!use_two_bit_bp || mispredicted)
+        {
+            redirect_pc(jump_target);
+            if_id_reg_.reset();
+            if (use_two_bit_bp && mispredicted)
+            {
+                branch_mispredictions_++;
+                report_hazard(HazardKind::Control, false, false, 1, id_ex_reg_.pc, INVALID_PC);
+            }
+        }
     }
 }
 
