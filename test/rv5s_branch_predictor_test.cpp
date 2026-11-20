@@ -249,27 +249,29 @@ TEST(RV5SBranchPredictorPipeline, HNFVariantAlsoSupportsPrediction)
     EXPECT_EQ(vm->GetBranchPredictor().GetMispredictions(), 2u);
 }
 
-TEST(RV5SBranchPredictorPipeline, NoForwardingVariantsStayStatic)
+TEST(RV5SBranchPredictorPipeline, NoHazardVariantsSupportPrediction)
 {
-    // Branches can only be checked in MEM without forwarding, so these variants must
-    // keep the static baseline instead of redirecting on a prediction they can't verify.
+    // NH variants assume hazard-free code (the programmer inserts NOPs), so branch
+    // operands are valid in EX and the predictor can drive the fetch there too.
     RV5StageProcessorNHF nhf;
     nhf.SetBranchPredictorType(BranchPredictorType::TwoBitBHT);
-    EXPECT_EQ(nhf.GetBranchPredictorType(), BranchPredictorType::StaticNotTaken);
-    EXPECT_FALSE(nhf.UsesBranchPrediction());
+    EXPECT_EQ(nhf.GetBranchPredictorType(), BranchPredictorType::TwoBitBHT);
+    EXPECT_TRUE(nhf.UsesBranchPrediction());
 
     RV5StageProcessorNHNF nhnf;
     nhnf.SetBranchPredictorType(BranchPredictorType::TwoBitBHT);
-    EXPECT_EQ(nhnf.GetBranchPredictorType(), BranchPredictorType::StaticNotTaken);
-    EXPECT_FALSE(nhnf.UsesBranchPrediction());
+    EXPECT_EQ(nhnf.GetBranchPredictorType(), BranchPredictorType::TwoBitBHT);
+    EXPECT_TRUE(nhnf.UsesBranchPrediction());
 
     auto nhfVm = runPredictedSource<RV5StageProcessorNHF>(BranchPredictorType::TwoBitBHT);
     EXPECT_EQ(nhfVm->registers_.ReadGpr(2), 4u);
     EXPECT_EQ(nhfVm->registers_.ReadGpr(3), 104u);
+    EXPECT_EQ(nhfVm->GetBranchPredictions(), 4u);
 
     auto nhnfVm = runPredictedSource<RV5StageProcessorNHNF>(BranchPredictorType::TwoBitBHT);
     EXPECT_EQ(nhnfVm->registers_.ReadGpr(2), 4u);
     EXPECT_EQ(nhnfVm->registers_.ReadGpr(3), 104u);
+    EXPECT_EQ(nhnfVm->GetBranchPredictions(), 4u);
 }
 
 TEST(RV5SBranchPredictorPipeline, PredictsThroughHazardStalls)

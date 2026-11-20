@@ -12,6 +12,7 @@ This folder adds a small HTTP API to the existing Kites simulator and a minimal 
 - A synchronous run-to-completion API endpoint through `ProcessorManager::run`.
 - Reset through `ProcessorManager::reset`.
 - All 32 GPRs, all 32 FPRs, CSRs, PC, and execution counters.
+- A 2-bit saturating-counter branch predictor (64-entry BTB + BHT) on every RV5 pipeline variant, with a predictor selector, live accuracy stats, and a BTB inspector in the Datapath tab.
 - Lazy memory pages (256 bytes per request; API caps a request at 4096 bytes) and byte writes through Kites' `MemoryController`.
 - Existing Kites VM choices: `rvss`, `rv5-nh-nf`, `rv5-h-nf`, `rv5-nh-f`, `rv5-h-f`.
 
@@ -74,6 +75,6 @@ VITE_KITES_API=http://127.0.0.1:8080 npm run dev
 - The web UI animates execution by requesting one simulator step at a time. Its speed slider adjusts the delay between steps, and Stop halts between requests. The direct `POST /api/simulator/run` endpoint remains synchronous and blocks the API event loop until Kites stops or the program exits.
 - The Kites CLI documentation notes that the pipelined VMs currently support I/M only; F/D support is currently available in the single-cycle `rvss` VM. The UI offers the VM types Kites itself exposes and does not claim that every pipeline implements F/D.
 - The **Datapath** tab is connected to the per-cycle `stages` and `hazard` fields in `GET /api/state`; cache visualization is still not exposed. The register, execution, and memory views are connected to the actual C++ simulator.
-- The pipeline modes are intentionally different: `rv5-nh-nf` and `rv5-nh-f` do not detect data hazards, so dependent instructions need programmer-inserted NOPs. `rv5-h-nf` and `rv5-h-f` stall automatically; `rv5-h-f` also forwards available results.
+- The pipeline modes are intentionally different: `rv5-nh-nf` and `rv5-nh-f` do not detect data hazards, so dependent instructions need programmer-inserted NOPs. `rv5-h-nf` and `rv5-h-f` stall automatically; `rv5-h-f` also forwards available results. The 2-bit predictor is available on all four pipeline variants, but on the NH variants it inherits the same hazard-free-code requirement because branch operands are read in EX.
 - Assembly diagnostics are returned as an API error message. Source-mapped diagnostic tables can be added after exposing Kites' assembler diagnostic structures through the API.
 - This is a local development API. Do not expose it directly to the public internet without authentication, request limits, and deployment hardening.

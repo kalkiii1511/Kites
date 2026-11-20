@@ -186,6 +186,11 @@ void RV5StageProcessorNHNF::pipeline_fetch()
         // Latch the instruction and PC for the next stage (IF/ID register)
         if_id_reg_.instruction = memory_controller_.readInstruction(program_counter_);
         if_id_reg_.pc = program_counter_;
+
+        const BranchPrediction pred = branch_predictor_.Predict(program_counter_);
+        if_id_reg_.predicted_taken = pred.predicted_taken;
+        if_id_reg_.predicted_target = pred.predicted_target;
+        if_id_reg_.btb_hit = pred.btb_hit;
     }
     else
     {
@@ -273,8 +278,10 @@ void RV5StageProcessorNHNF::pipeline_execute()
     ex_mem_reg_.branch_taken = false;
     ex_mem_reg_.branch_target_pc = 0;
 
+    const bool use_two_bit_bp = UsesBranchPrediction();
+
     // --- Conditional Branch Check (B-type: BLT, BGE, etc.) ---
-    if (id_ex_reg_.branch && opcode == 0b1100011)
+    if (id_ex_reg_.pc != INVALID_PC && id_ex_reg_.branch && opcode == 0b1100011)
     {
         bool condition_met = false;
 
@@ -302,15 +309,29 @@ void RV5StageProcessorNHNF::pipeline_execute()
             break; // BGEU (Result of kSltu is 0 - Not Less Than Unsigned)
         }
 
-        if (condition_met)
+        const uint64_t actual_target = id_ex_reg_.pc + id_ex_reg_.imm;
+        const uint64_t expected_next_pc = condition_met ? actual_target : (id_ex_reg_.pc + 4);
+        const bool mispredicted = (id_ex_reg_.predicted_taken != condition_met) ||
+                                  (condition_met && id_ex_reg_.predicted_target != actual_target);
+
+        branch_predictor_.Update(id_ex_reg_.pc, condition_met, actual_target,
+                                 /*is_unconditional=*/false, id_ex_reg_.btb_hit, mispredicted,
+                                 &current_delta_.branch_predictor_change);
+
+        ex_mem_reg_.branch_taken = condition_met;
+        ex_mem_reg_.branch_target_pc = actual_target;
+
+        if (use_two_bit_bp && mispredicted)
         {
-            // Misprediction detected. Flag MEM stage to handle the 3-cycle flush.
-            ex_mem_reg_.branch_taken = true;
-            ex_mem_reg_.branch_target_pc = id_ex_reg_.pc + id_ex_reg_.imm;
+            redirect_pc(expected_next_pc);
+            if_id_reg_.reset();
+            branch_mispredictions_++;
+            // Prediction resolved in EX: only the wrongly fetched instruction is discarded.
+            report_hazard(HazardKind::Control, false, false, 1, id_ex_reg_.pc, INVALID_PC);
         }
     }
     // --- Unconditional Jump Check (JAL/JALR: 1-cycle penalty) ---
-    else if (opcode == 0b1101111 || opcode == 0b1100111)
+    else if (id_ex_reg_.pc != INVALID_PC && (opcode == 0b1101111 || opcode == 0b1100111))
     {
         uint64_t jump_target;
         if (opcode == 0b1101111)
@@ -323,14 +344,26 @@ void RV5StageProcessorNHNF::pipeline_execute()
             ex_mem_reg_.alu_result = id_ex_reg_.pc + 4; // Set link address (PC+4)
         }
 
-        // 1. Redirect PC (Auto-Advance)
-        redirect_pc(jump_target);
+        const bool mispredicted =
+            (!id_ex_reg_.predicted_taken) || (id_ex_reg_.predicted_target != jump_target);
 
-        // 2. Kill the next instruction (IF/ID register) to incur the 1-bubble penalty.
-        if_id_reg_.reset();
+        branch_predictor_.Update(id_ex_reg_.pc, /*actual_taken=*/true, jump_target,
+                                 /*is_unconditional=*/true, id_ex_reg_.btb_hit, mispredicted,
+                                 &current_delta_.branch_predictor_change);
 
-        // 3. Mark as taken (for link register write)
         ex_mem_reg_.branch_taken = true;
+        ex_mem_reg_.branch_target_pc = jump_target;
+
+        if (!use_two_bit_bp || mispredicted)
+        {
+            redirect_pc(jump_target);
+            if_id_reg_.reset();
+            if (use_two_bit_bp && mispredicted)
+            {
+                branch_mispredictions_++;
+                report_hazard(HazardKind::Control, false, false, 1, id_ex_reg_.pc, INVALID_PC);
+            }
+        }
     }
 }
 

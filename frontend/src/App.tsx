@@ -301,7 +301,8 @@ function App() {
   const [vm, setVm] = useState('rvss');
   const [predictor, setPredictor] = useState<'2bit' | 'static-nt'>('2bit');
   // Branch prediction needs a variant that resolves branch conditions in EX.
-  const predictorSupported = vm === 'rv5-h-f' || vm === 'rv5-h-nf';
+  const predictorSupported =
+    vm === 'rv5-h-f' || vm === 'rv5-h-nf' || vm === 'rv5-nh-f' || vm === 'rv5-nh-nf';
   const [instructions, setInstructions] = useState<InstructionRow[]>([]);
   const [currentSourceLine, setCurrentSourceLine] = useState(0);
   const [currentAddress, setCurrentAddress] = useState('');
@@ -895,7 +896,7 @@ function App() {
           disabled={busy || running || !predictorSupported}
           value={predictorSupported ? predictor : 'static-nt'}
           onChange={e => setPredictor(e.target.value as '2bit' | 'static-nt')}
-          title={predictorSupported ? 'Branch predictor used by the RV5 H_* variants' : 'Branch prediction needs an RV5 H/NF or H/F variant (branch resolved in EX)'}
+          title={predictorSupported ? 'Branch predictor used by the RV5 pipeline variants' : 'Branch prediction needs an RV5 pipeline variant (RVSS is single-cycle)'}
         >
           <option value="2bit">2-bit predictor</option>
           <option value="static-nt">Static not taken</option>
@@ -1110,7 +1111,7 @@ function App() {
                       })}</tbody>
                     </table></div>
                   : <div className="predictor-empty">No branches executed yet. Load the <b>Branch Prediction · 2-bit BTB</b> example, assemble with an H/* VM, then run it.</div>}
-              </> : <div className="predictor-empty">This VM uses static not-taken prediction and keeps no BTB/BHT. Pick RV5 H/NF or H/F to use the 2-bit predictor.</div>}
+              </> : <div className="predictor-empty">RVSS is single-cycle and has no fetch redirection, so it keeps no BTB/BHT. Pick any RV5 pipeline variant to use the 2-bit predictor.</div>}
             </div>
             <div className="stage-legend">
               {stageOrder.map(stage => <span key={stage} style={{ color: stageColors[stage] }}><i style={{ background: stageColors[stage] }} />{stage}</span>)}

@@ -41,6 +41,9 @@ class RV5StageProcessorNHF : public RV5StageVM_Base
     }
     void SetActiveWireNames() override;
 
+    // Branch operands are resolved in EX (assuming hazard-free code for NH variants).
+    bool SupportsBranchPrediction() const override { return true; }
+
   private:
     // --- Private methods for each pipeline stage ---
     void pipeline_fetch() override;
