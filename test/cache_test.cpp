@@ -283,9 +283,8 @@ TEST_F(CacheTest, PeekByteSeesDirtyDataWithoutSideEffects)
 
 // ── Accesses spanning two lines ──────────────────────────────────────────────
 
-// Bug: a miss re-fetches every line the access touches, even ones already cached. The
-// cached line is loaded again from memory into a second way, where it shadows the dirty
-// copy (findWay returns the lowest way), so reads see the old value.
+// A split access with a cached dirty line and a missing line must preserve the
+// cached value while fetching the other line.
 TEST_F(CacheTest, LineCrossingReadDoesNotDuplicateDirtyLine)
 {
     // 1 set, 1 word/line, 2 ways
@@ -303,9 +302,8 @@ TEST_F(CacheTest, LineCrossingReadDoesNotDuplicateDirtyLine)
     EXPECT_EQ(cache2.readWord(0x100), 5u);
 }
 
-// Bug: bringing in the second line of an access can evict the first line of the same
-// access, when both map to one set with too few ways. getByteFromCache then asserts
-// (Debug; this aborts the test process) or reads out of bounds (Release).
+// A split access that maps both lines to one set must complete safely even when
+// the set has only one way.
 TEST_F(CacheTest, LineCrossingReadDoesNotEvictItsOwnLine)
 {
     // 1 set, 1 word/line, 1 way
@@ -319,8 +317,8 @@ TEST_F(CacheTest, LineCrossingReadDoesNotEvictItsOwnLine)
     EXPECT_EQ(cache2.readWord(0x02), 0x06050403u);
 }
 
-// Bug: with no-write-allocate, a store that only partly hits is treated as a miss and
-// written to the next level only, so the cached line keeps the old bytes.
+// A partial no-write-allocate store must keep its cached bytes coherent while
+// sending bytes for uncached lines directly to the next level.
 TEST_F(CacheTest, NoWriteAllocatePartialHitUpdatesCachedLine)
 {
     // 1 set, 1 word/line, 2 ways (the default write/allocate policies)
@@ -334,7 +332,47 @@ TEST_F(CacheTest, NoWriteAllocatePartialHitUpdatesCachedLine)
     cache2.writeDoubleWord(0x100, 0x1111111122222222);
 
     EXPECT_EQ(ram2.readWord(0x100), 0x22222222u);   // memory is right
-    EXPECT_EQ(cache2.readWord(0x100), 0x22222222u); // cached line is stale
+    EXPECT_EQ(cache2.readWord(0x100), 0x22222222u); // cached bytes were updated
+}
+
+TEST_F(CacheTest, NoWriteAllocateCrossLineWriteThroughKeepsCachedBytesCoherent)
+{
+    // A 64-bit store starting two bytes before the line boundary updates the
+    // cached portion and writes the uncached portion directly to memory.
+    Kites::MainMemory ram2;
+    Kites::Cache cache2(ram2, 1, 4, 2,
+                        Kites::WritePolicy::WriteThrough,
+                        Kites::AllocationPolicy::NoWriteAllocate,
+                        Kites::ReplacementPolicy::LRU);
+
+    cache2.readWord(0x100); // cache the first four-byte line
+    cache2.writeDoubleWord(0x102, 0xA1B2C3D4E5F60718ULL);
+
+    EXPECT_EQ(cache2.readHalfWord(0x102), 0x0718u);
+    EXPECT_EQ(ram2.readByte(0x102), 0x18);
+    EXPECT_EQ(ram2.readByte(0x103), 0x07);
+    EXPECT_EQ(ram2.readByte(0x104), 0xF6);
+    EXPECT_EQ(ram2.readByte(0x109), 0xA1);
+}
+
+TEST_F(CacheTest, NoWriteAllocateCrossLineWriteBackFlushPreservesBothParts)
+{
+    Kites::MainMemory ram2;
+    Kites::Cache cache2(ram2, 1, 4, 2,
+                        Kites::WritePolicy::WriteBack,
+                        Kites::AllocationPolicy::NoWriteAllocate,
+                        Kites::ReplacementPolicy::LRU);
+
+    cache2.readWord(0x100); // first line is cached
+    cache2.writeDoubleWord(0x102, 0xA1B2C3D4E5F60718ULL);
+    cache2.flush();
+
+    EXPECT_EQ(ram2.readByte(0x101), 0x00); // outside the store is unchanged
+    EXPECT_EQ(ram2.readByte(0x102), 0x18);
+    EXPECT_EQ(ram2.readByte(0x103), 0x07);
+    EXPECT_EQ(ram2.readByte(0x104), 0xF6);
+    EXPECT_EQ(ram2.readByte(0x109), 0xA1);
+    EXPECT_EQ(ram2.readByte(0x10A), 0x00);
 }
 
 // ── Replacement policies ──────────────────────────────────────────────────────

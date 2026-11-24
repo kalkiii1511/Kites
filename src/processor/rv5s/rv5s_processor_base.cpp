@@ -1,6 +1,7 @@
 #include "common/debug_colors.h"
 #include "common/instructions.h"
 #include "processor/rv5s/rv5s_processor_base.h"
+#include "processor/rv5s/rv5s_fp_utils.h"
 #include <thread>
 
 namespace Kites
@@ -250,10 +251,8 @@ void RV5StageVM_Base::pipeline_decode()
         id_ex_reg_.freg1_data = registers_.ReadFpr(id_ex_reg_.frs1);
         id_ex_reg_.freg2_data = registers_.ReadFpr(id_ex_reg_.frs2);
         id_ex_reg_.freg3_data = registers_.ReadFpr(id_ex_reg_.frs3);
-
-
-        // For load instructions, rs1 is a GPR base address.
-        // For integer-to-float conversions / moves, rs1 is also a GPR source.
+        if (rv5s_fp::usesGprRs1(instruction))
+            id_ex_reg_.reg1_data = registers_.ReadGpr(id_ex_reg_.rs1);
     }
     else
     {
@@ -262,9 +261,11 @@ void RV5StageVM_Base::pipeline_decode()
     }
 
     // Pass all control signals to the next stage
-    id_ex_reg_.reg_write  = control_unit_.GetRegWrite();
-    id_ex_reg_.freg_write = instruction_set::isFInstruction(instruction) ||
-                            instruction_set::isDInstruction(instruction);
+    const bool isFpInstruction = instruction_set::isFInstruction(instruction) ||
+                                 instruction_set::isDInstruction(instruction);
+    id_ex_reg_.reg_write = isFpInstruction ? rv5s_fp::writesGpr(instruction)
+                                           : control_unit_.GetRegWrite();
+    id_ex_reg_.freg_write = isFpInstruction && rv5s_fp::writesFpr(instruction);
     id_ex_reg_.branch     = control_unit_.GetBranch();
     id_ex_reg_.alu_src    = control_unit_.GetAluSrc();
     id_ex_reg_.mem_read   = control_unit_.GetMemRead();
@@ -627,23 +628,23 @@ void RV5StageVM_Base::pipeline_writeback()
         instructions_retired_++;
     }
 
-    if (!mem_wb_reg_.reg_write)
-    {
-        return;
-    }
-
     // --- FP Writeback Delegation ---
     // Before the rd != 0 check: for FP ops rd names an FPR, and f0 is writable.
     if (instruction_set::isFInstruction(mem_wb_reg_.instruction))
     {
-        pipeline_writeback_float();
+        if (mem_wb_reg_.reg_write || mem_wb_reg_.freg_write)
+            pipeline_writeback_float();
         return;
     }
     else if (instruction_set::isDInstruction(mem_wb_reg_.instruction))
     {
-        pipeline_writeback_double();
+        if (mem_wb_reg_.reg_write || mem_wb_reg_.freg_write)
+            pipeline_writeback_double();
         return;
     }
+
+    if (!mem_wb_reg_.reg_write)
+        return;
 
     if (mem_wb_reg_.rd != 0)
     {
@@ -711,8 +712,8 @@ void RV5StageVM_Base::pipeline_writeback_float()
     unsigned int reg_type = 2; // 0 for GPR, 1 for CSR, 2 for FPR
     uint64_t new_reg = 0;
 
-    // write to GPR
-    if (funct7 == 0b1010000 || funct7 == 0b1100000 || funct7 == 0b1110000)
+    // The decode stage marks the actual destination file, including compare/classify/move ops.
+    if (mem_wb_reg_.reg_write)
     { // f(eq|lt|le).s, fcvt.(w|wu|l|lu).s
         old_reg = registers_.ReadGpr(rd);
         registers_.WriteGpr(rd, mem_wb_reg_.alu_result);
@@ -753,8 +754,7 @@ void RV5StageVM_Base::pipeline_writeback_double()
     unsigned int reg_type = 2; // 0 for GPR, 1 for CSR, 2 for FPR
     uint64_t new_reg = 0;
 
-    // write to GPR
-    if (funct7 == 0b1010001 || funct7 == 0b1100001 || funct7 == 0b1110001)
+    if (mem_wb_reg_.reg_write)
     { // f(eq|lt|le).d, fcvt.(w|wu|l|lu).d
         old_reg = registers_.ReadGpr(rd);
         registers_.WriteGpr(rd, mem_wb_reg_.alu_result);

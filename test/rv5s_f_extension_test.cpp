@@ -326,12 +326,10 @@ TEST(FExt_MixedHazard_H_NF, mixed_gpr_fpr_hazard) {
     EXPECT_EQ(vm->registers_.ReadGpr(10), 16);
 }
 
-#if 0
 TEST(FExt_MixedHazard_H_F, mixed_gpr_fpr_hazard) {
     auto vm = runHF("../examples/fd-extension/f_mixed_gpr_fpr_hazard.s");
     EXPECT_EQ(vm->registers_.ReadGpr(10), 16);
 }
-#endif
 
 // =============================================================
 // SECTION 9: Arithmetic Chain Hazard — H_NF and H_F only
@@ -497,10 +495,8 @@ TEST(FExt_ConvertHazard_H_NF, convert_hazard) {
     EXPECT_EQ(vm->registers_.ReadGpr(11), 25);
 }
 
-#if 0
 TEST(FExt_ConvertHazard_H_F, convert_hazard) {
     auto vm = runHF("../examples/fd-extension/f_convert_hazard.s");
     EXPECT_EQ(vm->registers_.ReadGpr(10), 24);
     EXPECT_EQ(vm->registers_.ReadGpr(11), 25);
 }
-#endif

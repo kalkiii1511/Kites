@@ -1,6 +1,6 @@
 # Kites Web Simulator (connected frontend + C++ API)
 
-This folder adds a small HTTP API to the existing Kites simulator and a minimal React frontend. The web app does **not** emulate instructions in JavaScript: assemble, step, run, reset, register reads/writes, and memory access are delegated to the Kites C++ engine.
+This project adds a small HTTP adapter and a React frontend on top of the existing Kites simulator. The web app does **not** emulate instructions in JavaScript: assemble, step, run, reset, register reads/writes, and memory access are delegated to the Kites C++ engine. The Kites engine is the existing backend this project builds on; the web adapter, frontend, and their integration are the project-specific layer.
 
 ## What is connected
 
@@ -13,6 +13,7 @@ This folder adds a small HTTP API to the existing Kites simulator and a minimal 
 - Reset through `ProcessorManager::reset`.
 - All 32 GPRs, all 32 FPRs, CSRs, PC, and execution counters.
 - A 2-bit saturating-counter branch predictor (64-entry BTB + BHT) on every RV5 pipeline variant, with a predictor selector, live accuracy stats, and a BTB inspector in the Datapath tab.
+- A Cache tab connected to the instruction cache, L1 data cache, and L2 unified cache, with live lines, hit/miss stats, and supported geometry/write/replacement settings.
 - Lazy memory pages (256 bytes per request; API caps a request at 4096 bytes) and byte writes through Kites' `MemoryController`.
 - Existing Kites VM choices: `rvss`, `rv5-nh-nf`, `rv5-h-nf`, `rv5-nh-f`, `rv5-h-f`.
 
@@ -39,7 +40,7 @@ cmake --build build --target kites_web_api -j
 
 Change `CMAKE_PREFIX_PATH` to the Qt kit installed on your machine. If Qt is already discoverable by CMake, omit that argument.
 
-The API listens on `http://127.0.0.1:8080`.
+The frontend connects to `http://127.0.0.1:8080`. The API process currently binds to all network interfaces.
 
 ## 2. Run the web frontend
 
@@ -47,7 +48,7 @@ Open a second terminal:
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -63,18 +64,21 @@ VITE_KITES_API=http://127.0.0.1:8080 npm run dev
 
 - `GET /api/health`
 - `GET /api/state` (includes `pipeline`, `processor`, five `stages` with `stage`/`pc`/`valid`, and a `hazard` object with `type`, `stalled`, `forwarded`, `stalls`, `sourcePc`, `consumerPc`, `register`, and `fpr`)
-- `POST /api/program/assemble` JSON: `{ "source": "...assembly...", "vm": "rvss" }`
+- `POST /api/diagnostics` JSON: `{ "source": "...assembly..." }` (returns line and column diagnostics)
+- `POST /api/program/assemble` JSON: `{ "source": "...assembly...", "vm": "rvss", "branchPredictor": "2bit" }`
 - `POST /api/simulator/step` JSON: `{ "count": 1 }` (count is clamped to 1–1000)
 - `POST /api/simulator/run` JSON: `{}`
 - `POST /api/simulator/reset` JSON: `{}`
+- `GET /api/cache` (instruction, L1 data, and L2 unified cache snapshots)
+- `POST /api/cache/config` JSON: cache level, set count, line size, ways, replacement, write, and allocation policies
 - `GET /api/memory?address=0x10000000&length=256`
 - `POST /api/memory/write` JSON: `{ "address": "0x10000000", "value": 42 }`
 
 ## Current integration boundaries
 
 - The web UI animates execution by requesting one simulator step at a time. Its speed slider adjusts the delay between steps, and Stop halts between requests. The direct `POST /api/simulator/run` endpoint remains synchronous and blocks the API event loop until Kites stops or the program exits.
-- The Kites CLI documentation notes that the pipelined VMs currently support I/M only; F/D support is currently available in the single-cycle `rvss` VM. The UI offers the VM types Kites itself exposes and does not claim that every pipeline implements F/D.
-- The **Datapath** tab is connected to the per-cycle `stages` and `hazard` fields in `GET /api/state`; cache visualization is still not exposed. The register, execution, and memory views are connected to the actual C++ simulator.
+- The `rvss` single-cycle VM and all four RV5 pipeline modes support I, M, F, and D instructions. The pipeline modes differ in dependency detection and forwarding; see the mode descriptions in the UI.
+- The **Datapath** tab is connected to per-cycle `stages`, `hazard`, and branch predictor state in `GET /api/state`. The **Cache** tab reads and configures the instruction, L1 data, and L2 unified caches through the API. The register, execution, and memory views are connected to the actual C++ simulator.
 - The pipeline modes are intentionally different: `rv5-nh-nf` and `rv5-nh-f` do not detect data hazards, so dependent instructions need programmer-inserted NOPs. `rv5-h-nf` and `rv5-h-f` stall automatically; `rv5-h-f` also forwards available results. The 2-bit predictor is available on all four pipeline variants, but on the NH variants it inherits the same hazard-free-code requirement because branch operands are read in EX.
-- Assembly diagnostics are returned as an API error message. Source-mapped diagnostic tables can be added after exposing Kites' assembler diagnostic structures through the API.
-- This is a local development API. Do not expose it directly to the public internet without authentication, request limits, and deployment hardening.
+- Assembly diagnostics are returned with line and column information and appear in the editor with underlines and a diagnostic list. The editor also has lightweight local syntax highlighting; highlighting is not a full language server.
+- This is a development API. Its current listener binds to all network interfaces and it has no authentication. Do not expose it beyond a trusted development environment without access controls, request limits, and deployment hardening.

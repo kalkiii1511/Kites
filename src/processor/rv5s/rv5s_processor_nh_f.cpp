@@ -8,6 +8,7 @@
  * * @author Atharva and Harshit
  */
 #include "processor/rv5s/rv5s_processor_nh_f.h"
+#include "processor/rv5s/rv5s_fp_utils.h"
 #include "common/instructions.h"
 #include "config/config.h"
 #include "ui/processor_tab/processor_designs/rv5s_processor_nh_f_circuit_scene.h"
@@ -489,7 +490,7 @@ uint64_t RV5StageProcessorNHF::pipeline_execute_float()
     uint64_t reg2_value = id_ex_reg_.freg2_data;
     uint64_t reg3_value = id_ex_reg_.freg3_data;
 
-    if (funct7 == 0b1101000 || funct7 == 0b1111000 || opcode == 0b0000111 || opcode == 0b0100111)
+    if (rv5s_fp::usesGprRs1(instruction))
     {
         reg1_value = registers_.ReadGpr(id_ex_reg_.rs1);
     }
@@ -505,7 +506,7 @@ uint64_t RV5StageProcessorNHF::pipeline_execute_float()
     uint8_t fwd_c = 0;
 
     // EX/MEM forwarding (highest priority)
-    if (ex_mem_reg_.freg_write && (ex_mem_reg_.frd != 0))
+    if (ex_mem_reg_.freg_write)
     {
         if (ex_mem_reg_.frd == id_ex_reg_.frs1)
             fwd_a = 2;
@@ -516,7 +517,7 @@ uint64_t RV5StageProcessorNHF::pipeline_execute_float()
     }
 
     // MEM/WB forwarding (lower priority)
-    if (mem_wb_reg_.prev_freg_write && (mem_wb_reg_.prev_frd != 0))
+    if (mem_wb_reg_.prev_freg_write)
     {
         if (mem_wb_reg_.prev_frd == id_ex_reg_.frs1 && fwd_a != 2)
             fwd_a = 1;
@@ -547,9 +548,15 @@ uint64_t RV5StageProcessorNHF::pipeline_execute_float()
 
     // Re-apply GPR-read override (for conversion ops) after forwarding decision: if instruction
     // requires GPR, use it.
-    if (funct7 == 0b1101000 || funct7 == 0b1111000 || opcode == 0b0000111 || opcode == 0b0100111)
+    if (rv5s_fp::usesGprRs1(instruction))
     {
-        reg1_value = registers_.ReadGpr(id_ex_reg_.rs1);
+        reg1_value = id_ex_reg_.reg1_data;
+        if (ex_mem_reg_.reg_write && ex_mem_reg_.rd != 0 && ex_mem_reg_.rd == id_ex_reg_.rs1)
+            reg1_value = ex_mem_reg_.alu_result;
+        else if (mem_wb_reg_.prev_reg_write && mem_wb_reg_.prev_rd != 0 &&
+                 mem_wb_reg_.prev_rd == id_ex_reg_.rs1)
+            reg1_value = mem_wb_reg_.prev_mem_to_reg ? mem_wb_reg_.prev_memory_data
+                                                     : mem_wb_reg_.prev_alu_result;
     }
 
     // Re-apply immediate if ALUSrc was set (immediates take precedence for reg2)
@@ -597,7 +604,7 @@ uint64_t RV5StageProcessorNHF::pipeline_execute_double()
     uint64_t reg2_value = id_ex_reg_.freg2_data;
     uint64_t reg3_value = id_ex_reg_.freg3_data;
 
-    if (funct7 == 0b1101001 || funct7 == 0b1111001 || opcode == 0b0000111 || opcode == 0b0100111)
+    if (rv5s_fp::usesGprRs1(instruction))
     {
         reg1_value = registers_.ReadGpr(id_ex_reg_.rs1);
     }
@@ -614,7 +621,7 @@ uint64_t RV5StageProcessorNHF::pipeline_execute_double()
     uint8_t fwd_b = 0;
     uint8_t fwd_c = 0;
 
-    if (ex_mem_reg_.freg_write && (ex_mem_reg_.frd != 0))
+    if (ex_mem_reg_.freg_write)
     {
         if (ex_mem_reg_.frd == id_ex_reg_.frs1)
             fwd_a = 2;
@@ -624,7 +631,7 @@ uint64_t RV5StageProcessorNHF::pipeline_execute_double()
             fwd_c = 2;
     }
 
-    if (mem_wb_reg_.prev_freg_write && (mem_wb_reg_.prev_frd != 0))
+    if (mem_wb_reg_.prev_freg_write)
     {
         if (mem_wb_reg_.prev_frd == id_ex_reg_.frs1 && fwd_a != 2)
             fwd_a = 1;
@@ -653,9 +660,15 @@ uint64_t RV5StageProcessorNHF::pipeline_execute_double()
                                                  : mem_wb_reg_.prev_f_alu_result;
 
     // Re-apply GPR-read override for specific instructions
-    if (funct7 == 0b1101001 || funct7 == 0b1111001 || opcode == 0b0000111 || opcode == 0b0100111)
+    if (rv5s_fp::usesGprRs1(instruction))
     {
-        reg1_value = registers_.ReadGpr(id_ex_reg_.rs1);
+        reg1_value = id_ex_reg_.reg1_data;
+        if (ex_mem_reg_.reg_write && ex_mem_reg_.rd != 0 && ex_mem_reg_.rd == id_ex_reg_.rs1)
+            reg1_value = ex_mem_reg_.alu_result;
+        else if (mem_wb_reg_.prev_reg_write && mem_wb_reg_.prev_rd != 0 &&
+                 mem_wb_reg_.prev_rd == id_ex_reg_.rs1)
+            reg1_value = mem_wb_reg_.prev_mem_to_reg ? mem_wb_reg_.prev_memory_data
+                                                     : mem_wb_reg_.prev_alu_result;
     }
 
     // Re-apply immediate for reg2

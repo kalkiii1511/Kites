@@ -46,8 +46,7 @@ kites-cli <assembly-file> [--vm <name>] [--mem-dump <hex_addr> <row_count>]...
 | `rv5-nh-f`  | `RV5Stage_NH_F`         | 5-stage pipeline, no hazard detection, forwarding. |
 | `rv5-h-f`   | `RV5Stage_H_F`          | 5-stage pipeline, hazard detection, forwarding. |
 
-The pipelined VMs currently support the I and M extensions only (D/F
-pipelined support is planned).
+The pipelined VMs support the I, M, F, and D extensions. In `rv5-h-nf`, data dependencies are handled with stalls; in `rv5-h-f`, forwarding resolves dependencies with stalls for load-use hazards. The `rv5-nh-*` modes do not detect hazards, so programs must include safe instruction spacing (and load-use spacing where applicable).
 
 ## Example
 

@@ -13,6 +13,7 @@
 #include "common/instructions.h"
 #include "processor/pipeline_registers.h"
 #include "processor/rv5s/rv5s_hdu.h"
+#include "processor/rv5s/rv5s_fp_utils.h"
 
 namespace Kites
 {
@@ -72,9 +73,18 @@ InstructionSources instruction_sources(uint32_t instruction)
         sources.fpr_frs3 = true;
         break;
     case 0x53: // FP arithmetic / conversion
-        sources.fpr_frs1 = true;
-        sources.fpr_frs2 = true;
+    {
+        const uint8_t f7 = rv5s_fp::funct7(instruction);
+        if (rv5s_fp::usesGprRs1(instruction))
+            sources.gpr_rs1 = true;
+        else
+            sources.fpr_frs1 = true;
+        if (f7 != 0x2c && f7 != 0x2d && f7 != 0x60 && f7 != 0x61 &&
+            f7 != 0x68 && f7 != 0x69 && f7 != 0x70 && f7 != 0x71 &&
+            f7 != 0x78 && f7 != 0x79 && f7 != 0x20 && f7 != 0x21)
+            sources.fpr_frs2 = true;
         break;
+    }
     default:
         sources.fpr_frs1 = true;
         break;
